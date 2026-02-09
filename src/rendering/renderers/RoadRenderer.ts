@@ -10,6 +10,8 @@ import { isoCorners, hexIsoCenter, darkenColor } from "../Isometric";
  * Handles rendering of roads, paths, bridges, and piers
  */
 export class RoadRenderer {
+  private roadSegments: HexTile[][] = [];
+
   /**
    * Draw roads using pathfinding between settlement centers
    */
@@ -21,13 +23,16 @@ export class RoadRenderer {
   ): void {
     console.log(`[RoadRenderer] Drawing roads between ${settlements.length} settlements`);
 
+    // Clear previous segments
+    this.roadSegments = [];
+
     const cities = settlements.filter(s => s.type === 'city');
     const villages = settlements.filter(s => s.type === 'village');
 
     // Connect all cities to each other
     for (let i = 0; i < cities.length; i++) {
       for (let j = i + 1; j < cities.length; j++) {
-        this.drawRoadPath(roadGraphics, cities[i], cities[j], worldMap);
+        this.collectRoadPath(cities[i], cities[j], worldMap);
       }
     }
 
@@ -35,18 +40,66 @@ export class RoadRenderer {
     for (const village of villages) {
       const nearestCity = this.findNearestSettlement(village, cities);
       if (nearestCity) {
-        this.drawRoadPath(roadGraphics, village, nearestCity, worldMap);
+        this.collectRoadPath(village, nearestCity, worldMap);
       }
     }
+
+    // Now draw all collected road segments in two passes
+    this.drawAllRoads(roadGraphics);
 
     console.log('[RoadRenderer] Roads drawn successfully');
   }
 
   /**
-   * Draw a road path between two settlements using pathfinding
+   * Draw all collected road segments with proper layering (outlines first, then surfaces)
    */
-  private drawRoadPath(
+  private drawAllRoads(roadGraphics: Graphics): void {
+    const roadColor = 0xa89968;
+    const roadDark = 0x8b7e5a;
+    const roadWidth = 6;
+
+    // First pass: draw all outlines
+    for (const segment of this.roadSegments) {
+      this.drawSegmentLayer(roadGraphics, segment, roadDark, roadWidth + 2, 0.6);
+    }
+
+    // Second pass: draw all surfaces on top
+    for (const segment of this.roadSegments) {
+      this.drawSegmentLayer(roadGraphics, segment, roadColor, roadWidth, 0.8);
+    }
+  }
+
+  /**
+   * Draw a single layer (outline or surface) for a road segment
+   */
+  private drawSegmentLayer(
     roadGraphics: Graphics,
+    tiles: HexTile[],
+    color: number,
+    width: number,
+    alpha: number
+  ): void {
+    if (tiles.length < 2) return;
+
+    const centers = tiles.map(tile => hexIsoCenter(tile));
+
+    roadGraphics.moveTo(centers[0].x, centers[0].y);
+    for (let i = 1; i < centers.length; i++) {
+      roadGraphics.lineTo(centers[i].x, centers[i].y);
+    }
+    roadGraphics.stroke({
+      color,
+      width,
+      alpha,
+      cap: 'round',
+      join: 'round',
+    });
+  }
+
+  /**
+   * Collect road path segments between two settlements for later rendering
+   */
+  private collectRoadPath(
     from: Settlement,
     to: Settlement,
     worldMap: WorldMap
@@ -67,21 +120,16 @@ export class RoadRenderer {
       return;
     }
 
-    console.log(`[RoadRenderer] Drawing road with ${pathResult.path.length} segments`);
+    console.log(`[RoadRenderer] Collecting road with ${pathResult.path.length} segments`);
 
-    // Draw the path as a continuous road
+    // Collect the path segments
     const fullPath = [startTile, ...pathResult.path];
     
     // First pass: place piers at water crossings
     this.placePiersOnPath(fullPath);
     
-    // Second pass: draw road segments (skipping water)
-    for (let i = 0; i < fullPath.length - 1; i++) {
-      const tile1 = fullPath[i];
-      const tile2 = fullPath[i + 1];
-      
-      this.drawRoadSegment(roadGraphics, tile1, tile2);
-    }
+    // Second pass: collect road segments (split by water crossings)
+    this.collectContinuousRoadSegments(fullPath);
   }
 
   /**
@@ -119,41 +167,31 @@ export class RoadRenderer {
   }
 
   /**
-   * Draw a road segment between two tiles on the dedicated road layer
+   * Collect road segments, splitting at water crossings
    */
-  private drawRoadSegment(roadGraphics: Graphics, tile1: HexTile, tile2: HexTile): void {
-    // Don't draw roads over water tiles
-    if (isWater(tile1.terrain) || isWater(tile2.terrain)) {
-      return;
+  private collectContinuousRoadSegments(path: HexTile[]): void {
+    // Group consecutive land tiles into continuous path segments
+    let currentSegment: HexTile[] = [];
+
+    for (let i = 0; i < path.length; i++) {
+      const tile = path[i];
+
+      if (isWater(tile.terrain)) {
+        // Water tile - end current segment and store it
+        if (currentSegment.length >= 2) {
+          this.roadSegments.push([...currentSegment]);
+        }
+        currentSegment = [];
+      } else {
+        // Land tile - add to current segment
+        currentSegment.push(tile);
+      }
     }
 
-    // Get absolute world positions for both tiles
-    const center1 = hexIsoCenter(tile1);
-    const center2 = hexIsoCenter(tile2);
-
-    const roadColor = 0xa89968;
-    const roadDark = 0x8b7e5a;
-    const roadWidth = 6;
-
-    // Draw outline on dedicated road graphics (using absolute world coordinates)
-    roadGraphics.moveTo(center1.x, center1.y);
-    roadGraphics.lineTo(center2.x, center2.y);
-    roadGraphics.stroke({
-      color: roadDark,
-      width: roadWidth + 2,
-      alpha: 0.6,
-      cap: 'round',
-    });
-
-    // Draw surface
-    roadGraphics.moveTo(center1.x, center1.y);
-    roadGraphics.lineTo(center2.x, center2.y);
-    roadGraphics.stroke({
-      color: roadColor,
-      width: roadWidth,
-      alpha: 0.8,
-      cap: 'round',
-    });
+    // Store final segment if any
+    if (currentSegment.length >= 2) {
+      this.roadSegments.push([...currentSegment]);
+    }
   }
 
   /**

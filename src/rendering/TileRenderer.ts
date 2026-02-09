@@ -91,8 +91,8 @@ export class TileRenderer {
     const config = TERRAIN_CONFIG[hex.terrain];
     const sideH = getTileSideHeight(hex.terrain);
 
-    // Expand the polygon more aggressively to prevent subpixel seams between tiles
-    const expandedCorners = this.expandPoly(corners, 1.0);
+    // Expand the polygon slightly to prevent subpixel seams between tiles
+    const expandedCorners = this.expandPoly(corners, 0.5);
 
     // 1) Side faces (drawn first so top face covers the joint)
     this.terrainRenderer.drawSideFaces(gfx, hex, expandedCorners, sideH, config.baseColor);
@@ -110,6 +110,8 @@ export class TileRenderer {
     
     gfx.poly(expandedCorners);
     gfx.fill({ color: topColor });
+    // Use a very thin, semi-transparent stroke to fill seams without creating visible borders
+    gfx.stroke({ color: topColor, width: 0.5, alpha: 0.5 });
 
     // 3) Terrain detail on top face
     this.terrainRenderer.drawTerrainDetail(gfx, hex, corners);

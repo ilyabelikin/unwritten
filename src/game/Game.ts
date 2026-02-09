@@ -40,6 +40,12 @@ export class Game {
   constructor(app: Application) {
     this.app = app;
 
+    // Check for debug mode in URL
+    this.debugMode = new URLSearchParams(window.location.search).has('debug_mode');
+    if (this.debugMode) {
+      console.log('[Debug Mode] Enabled - Press R to toggle roads');
+    }
+
     // Create the world container
     this.worldContainer = new Container({ label: "world" });
     this.app.stage.addChild(this.worldContainer);
@@ -124,6 +130,14 @@ export class Game {
 
     // Draw roads connecting settlements (BEFORE vegetation and buildings)
     this.tileRenderer.drawRoadsFromSettlements(this.worldMap.grid, this.worldMap.settlements, this.worldMap);
+
+    // Store original road state for debug mode
+    if (this.debugMode) {
+      this.worldMap.grid.forEach((hex) => {
+        const key = `${hex.col},${hex.row}`;
+        this.originalRoadState.set(key, hex.hasRoad);
+      });
+    }
 
     // Draw vegetation, rocks, and buildings on tiles (these go on top of roads)
     this.worldMap.grid.forEach((hex) => {
@@ -264,6 +278,9 @@ export class Game {
           this.input.setEnabled(false);
         }
       }
+      if ((key === "r" || key === "R") && this.debugMode) {
+        this.toggleRoads();
+      }
     });
 
     // Mouse wheel zoom
@@ -280,6 +297,15 @@ export class Game {
 
   /** Is the character currently animating a move? */
   private isMoving: boolean = false;
+
+  /** Debug mode flag (enabled via ?debug_mode URL parameter) */
+  private debugMode: boolean = false;
+
+  /** Store original road state for debug toggle */
+  private originalRoadState: Map<string, boolean> = new Map();
+
+  /** Are roads currently hidden in debug mode? */
+  private roadsHidden: boolean = false;
 
   private handleSelectClick(worldX: number, worldY: number): void {
     const hex = this.findHexAtPoint(worldX, worldY);
@@ -429,23 +455,44 @@ export class Game {
   }
 
   /**
-   * Get the movement cost for a tile if it's a neighbor, null otherwise.
+   * Get the movement cost to reach a tile.
+   * Returns direct cost for neighbors, or pathfinding cost for distant tiles.
    */
   private getMovementCostForTile(tile: HexTile): number | null {
+    // Same tile as current position
+    if (tile.col === this.character.currentTile.col && 
+        tile.row === this.character.currentTile.row) {
+      return null;
+    }
+    
+    // Check if it's a neighbor for direct cost calculation
     const neighbors = this.worldMap.getNeighbors(this.character.currentTile);
     const isNeighbor = neighbors.some(
       (n) => n.col === tile.col && n.row === tile.row
     );
     
-    if (!isNeighbor) return null;
+    if (isNeighbor) {
+      // Direct neighbor - calculate immediate cost
+      return getAPCost(
+        tile.hasRoad,
+        tile.isRough,
+        tile.treeDensity,
+        this.character.currentTile.terrain,
+        tile.terrain,
+      );
+    }
     
-    return getAPCost(
-      tile.hasRoad,
-      tile.isRough,
-      tile.treeDensity,
-      this.character.currentTile.terrain,
-      tile.terrain,
+    // Not a neighbor - use pathfinding to get total cost
+    const pathResult = findPath(
+      this.character.currentTile,
+      tile,
+      this.worldMap,
+      true // Only use explored tiles
     );
+    
+    if (!pathResult.found) return null;
+    
+    return pathResult.totalCost;
   }
 
   /**
@@ -543,6 +590,67 @@ export class Game {
     
     // Consider "reached" if within 2 pixels
     return distance < 2;
+  }
+
+  /**
+   * Toggle roads visibility and effects (debug mode only).
+   * Press R to hide roads, press R again to restore them.
+   */
+  private toggleRoads(): void {
+    if (!this.debugMode) return;
+
+    this.roadsHidden = !this.roadsHidden;
+
+    if (this.roadsHidden) {
+      // Hide roads: set all hasRoad to false and hide the road container
+      console.log('[Debug Mode] Hiding roads...');
+      this.worldMap.grid.forEach((hex) => {
+        hex.hasRoad = false;
+      });
+      this.tileRenderer.roadContainer.visible = false;
+    } else {
+      // Restore roads: restore hasRoad from original state and show the road container
+      console.log('[Debug Mode] Restoring roads...');
+      this.worldMap.grid.forEach((hex) => {
+        const key = `${hex.col},${hex.row}`;
+        hex.hasRoad = this.originalRoadState.get(key) || false;
+      });
+      this.tileRenderer.roadContainer.visible = true;
+    }
+
+    // Update path preview if hovering
+    if (this.lastHoveredKey) {
+      const [col, row] = this.lastHoveredKey.split(',').map(Number);
+      const hoveredHex = this.worldMap.grid.getHex({ col, row });
+      if (hoveredHex && hoveredHex.explored) {
+        const pathResult = findPath(
+          this.character.currentTile,
+          hoveredHex,
+          this.worldMap,
+          true
+        );
+        if (pathResult.found && pathResult.path.length > 0) {
+          const isValid = pathResult.totalCost <= this.character.ap;
+          this.pathOverlay.showPath(pathResult.path, this.character.currentTile, isValid);
+        }
+      }
+    }
+
+    // Update tooltip if a tile is selected
+    if (this.selectedTile) {
+      const movementCost = this.getMovementCostForTile(this.selectedTile);
+      const settlement = this.worldMap.getSettlementForTile(this.selectedTile);
+      this.hud.showTooltip(
+        this.selectedTile.terrain, 
+        this.selectedTile.isRough, 
+        movementCost, 
+        this.character.ap, 
+        this.selectedTile.building,
+        settlement,
+        this.selectedTile.vegetation,
+        this.selectedTile.treeDensity
+      );
+    }
   }
 
   /** Update fog of war based on character's vision radius. */
