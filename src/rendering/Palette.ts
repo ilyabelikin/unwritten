@@ -31,6 +31,8 @@ export const Palette = {
   treeTrunk: 0x6b4226,
   treeCanopy: 0x2d6e1e,
   treeCanopyLight: 0x3e8f2f,
+  forestDark: 0x1a4d1a,
+  forestMedium: 0x2d6e1e,
 
   // Character
   character: 0xe85040,

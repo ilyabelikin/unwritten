@@ -3,6 +3,7 @@ import { Palette } from "./Palette";
 import { MAX_AP } from "../entity/Character";
 import { TERRAIN_CONFIG, TerrainType, VegetationType } from "../world/Terrain";
 import { BuildingType, BUILDING_CONFIG, Settlement } from "../world/Building";
+import { ResourceDeposit, RESOURCE_CONFIG } from "../world/Resource";
 
 /**
  * Heads-Up Display — overlays AP counter, turn info, terrain tooltip,
@@ -149,6 +150,7 @@ export class HUD {
     settlement?: Settlement,
     vegetation?: VegetationType,
     treeDensity?: number,
+    resource?: ResourceDeposit,
   ): void {
     const config = TERRAIN_CONFIG[terrain];
     const roughSuffix = isRough ? " (Rough)" : "";
@@ -210,6 +212,18 @@ export class HUD {
         const landmarkConfig = BUILDING_CONFIG[settlement.landmark];
         text += `\n  Landmark: ${landmarkConfig.name}`;
       }
+    }
+
+    // Add resource information if present
+    if (resource && resource.type !== "none") {
+      const resourceConfig = RESOURCE_CONFIG[resource.type];
+      const qualityPercent = Math.round(resource.quality * 100);
+      const qualityDesc = 
+        resource.quality >= 0.8 ? "Excellent" :
+        resource.quality >= 0.6 ? "Good" :
+        resource.quality >= 0.4 ? "Fair" :
+        "Poor";
+      text += `\n⬥ ${resourceConfig.name} (${qualityDesc})`;
     }
 
     this.tooltipText.text = text;

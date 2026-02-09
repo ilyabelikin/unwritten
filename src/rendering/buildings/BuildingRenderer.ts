@@ -56,21 +56,54 @@ export class BuildingRenderer {
         this.landmarkRenderer.drawWindmill(gfx, cx, cy);
         break;
 
-      // Industrial
+      // Industrial - Food Extraction
+      case BuildingType.HuntingLodge:
+        this.industrialRenderer.drawHuntingLodge(gfx, cx, cy);
+        break;
+      case BuildingType.FishingHut:
+        this.industrialRenderer.drawFishingHut(gfx, cx, cy);
+        break;
+      case BuildingType.Pasture:
+        this.industrialRenderer.drawPasture(gfx, cx, cy);
+        break;
+
+      // Industrial - Material Extraction
       case BuildingType.LumberCamp:
         this.industrialRenderer.drawLumberCamp(gfx, cx, cy);
         break;
       case BuildingType.Sawmill:
         this.industrialRenderer.drawSawmill(gfx, cx, cy);
         break;
-      case BuildingType.Mine:
-        this.industrialRenderer.drawMine(gfx, cx, cy);
+      case BuildingType.ClayPit:
+        this.industrialRenderer.drawClayPit(gfx, cx, cy);
         break;
       case BuildingType.Quarry:
         this.industrialRenderer.drawQuarry(gfx, cx, cy);
         break;
-      case BuildingType.FishingHut:
-        this.industrialRenderer.drawFishingHut(gfx, cx, cy);
+      case BuildingType.SaltWorks:
+        this.industrialRenderer.drawSaltWorks(gfx, cx, cy);
+        break;
+
+      // Industrial - Mineral Extraction
+      case BuildingType.CopperMine:
+        this.industrialRenderer.drawCopperMine(gfx, cx, cy);
+        break;
+      case BuildingType.IronMine:
+        this.industrialRenderer.drawIronMine(gfx, cx, cy);
+        break;
+      case BuildingType.SilverMine:
+        this.industrialRenderer.drawSilverMine(gfx, cx, cy);
+        break;
+      case BuildingType.GoldMine:
+        this.industrialRenderer.drawGoldMine(gfx, cx, cy);
+        break;
+      case BuildingType.GemMine:
+        this.industrialRenderer.drawGemMine(gfx, cx, cy);
+        break;
+
+      // Legacy mine (generic)
+      case BuildingType.Mine:
+        this.industrialRenderer.drawMine(gfx, cx, cy);
         break;
 
       // Commercial

@@ -1,6 +1,7 @@
 import { defineHex } from "honeycomb-grid";
 import { TerrainType, VegetationType } from "./Terrain";
 import { BuildingType } from "./Building";
+import { ResourceDeposit, ResourceType } from "./Resource";
 
 /**
  * The hex dimensions control tile size on screen.
@@ -39,4 +40,7 @@ export class HexTile extends defineHex({
 
   /** Does this tile have a road? */
   hasRoad: boolean = false;
+
+  /** Natural resource deposit on this tile (if any) */
+  resource?: ResourceDeposit;
 }

@@ -7,6 +7,8 @@ import { getHexNeighbors, getHexDistance } from "./HexMapUtils";
 import { TerrainGenerator } from "./generators/TerrainGenerator";
 import { VegetationGenerator } from "./generators/VegetationGenerator";
 import { SettlementGenerator } from "./generators/SettlementGenerator";
+import { ResourceGenerator } from "./generators/ResourceGenerator";
+import { RoadsideResourcePlacer } from "./generators/RoadsideResourcePlacer";
 
 export interface WorldGenConfig {
   width: number;
@@ -57,6 +59,8 @@ export class WorldGenerator implements IPathfindingMap {
   private terrainGenerator: TerrainGenerator;
   private vegetationGenerator: VegetationGenerator;
   private settlementGenerator: SettlementGenerator;
+  private resourceGenerator: ResourceGenerator;
+  private roadsideResourcePlacer: RoadsideResourcePlacer;
 
   constructor(config: Partial<WorldGenConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -69,6 +73,8 @@ export class WorldGenerator implements IPathfindingMap {
       this.seededRandom.bind(this),
       this.hexDistance.bind(this)
     );
+    this.resourceGenerator = new ResourceGenerator(this.config.seed);
+    this.roadsideResourcePlacer = new RoadsideResourcePlacer();
   }
 
   getSettlements(): Settlement[] {
@@ -116,11 +122,26 @@ export class WorldGenerator implements IPathfindingMap {
     console.log('[WorldGenerator] Pass 5: Settlements');
     this.settlements = this.settlementGenerator.generateSettlements(this.grid);
 
-    // Pass 6: Generate roads connecting settlements
-    console.log('[WorldGenerator] Pass 6: Roads');
+    // Pass 6: Generate natural resources
+    console.log('[WorldGenerator] Pass 6: Resources');
+    this.resourceGenerator.generateResources(this.grid);
+
+    // Pass 7: Generate roads connecting settlements
+    console.log('[WorldGenerator] Pass 7: Roads');
     this.generateRoads(this.grid);
 
+    // Pass 8: Place roadside hamlets on unexploited resources near roads
+    console.log('[WorldGenerator] Pass 8: Roadside resource hamlets');
+    const roadsideHamlets = this.roadsideResourcePlacer.placeRoadsideHamlets(
+      this.grid,
+      this.settlements,
+      this.seededRandom.bind(this)
+    );
+    // Add new hamlets to settlements list
+    this.settlements.push(...roadsideHamlets);
+
     console.log('[WorldGenerator] World generation complete!');
+    console.log(`[WorldGenerator] Final settlement count: ${this.settlements.length} total`);
 
     return this.grid;
   }

@@ -154,10 +154,11 @@ export class Game {
       });
     }
 
-    // Draw vegetation, rocks, and buildings on tiles (these go on top of roads)
+    // Draw vegetation, rocks, resources, and buildings on tiles (these go on top of roads)
     this.worldMap.grid.forEach((hex) => {
       this.tileRenderer.drawVegetation(hex);
       this.tileRenderer.drawRocks(hex);
+      this.tileRenderer.drawResource(hex);
       this.tileRenderer.drawBuilding(hex, this.worldMap.grid);
     });
 
@@ -223,10 +224,32 @@ export class Game {
       this.camera.snapToTarget();
     };
 
-    // Character: Click to open character sheet
-    this.characterRenderer.onClick = () => {
+    // Character: Left click to open character sheet
+    this.characterRenderer.onLeftClick = () => {
       this.characterSheet.show();
       this.input.setEnabled(false); // Disable map input
+    };
+    
+    // Character: Right click to show location tooltip
+    this.characterRenderer.onRightClick = () => {
+      const tile = this.character.currentTile;
+      this.selectedTile = tile;
+      this.highlightOverlay.showHover(tile);
+      
+      const movementCost = this.getMovementCostForTile(tile);
+      const settlement = this.worldMap.getSettlementForTile(tile);
+      
+      this.hud.showTooltip(
+        tile.terrain, 
+        tile.isRough, 
+        movementCost, 
+        this.character.ap, 
+        tile.building,
+        settlement,
+        tile.vegetation,
+        tile.treeDensity,
+        tile.resource
+      );
     };
 
     // Character Sheet: Re-enable input when closed
@@ -372,7 +395,8 @@ export class Game {
       hex.building,
       settlement,
       hex.vegetation,
-      hex.treeDensity
+      hex.treeDensity,
+      hex.resource
     );
   }
 
@@ -686,7 +710,8 @@ export class Game {
         this.selectedTile.building,
         settlement,
         this.selectedTile.vegetation,
-        this.selectedTile.treeDensity
+        this.selectedTile.treeDensity,
+        this.selectedTile.resource
       );
     }
   }

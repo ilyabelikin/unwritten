@@ -8,12 +8,23 @@ export enum BuildingType {
   // Generic village structures
   House = "house",
   Field = "field",
-  // Specialized village structures
+  // Resource extraction - Food
+  HuntingLodge = "hunting_lodge",
+  FishingHut = "fishing_hut",
+  Pasture = "pasture",
+  // Resource extraction - Materials
   LumberCamp = "lumber_camp",
   Sawmill = "sawmill",
-  Mine = "mine",
+  ClayPit = "clay_pit",
   Quarry = "quarry",
-  FishingHut = "fishing_hut",
+  SaltWorks = "salt_works",
+  // Resource extraction - Minerals
+  CopperMine = "copper_mine",
+  IronMine = "iron_mine",
+  SilverMine = "silver_mine",
+  GoldMine = "gold_mine",
+  GemMine = "gem_mine",
+  // Other specialized structures
   Dock = "dock",
   Monastery = "monastery",
   Chapel = "chapel",
@@ -31,6 +42,8 @@ export enum BuildingType {
   // Infrastructure
   Pier = "pier",
   Bridge = "bridge",
+  // Legacy (keeping for compatibility)
+  Mine = "mine",
 }
 
 export interface BuildingConfig {
@@ -81,6 +94,32 @@ export const BUILDING_CONFIG: Record<BuildingType, BuildingConfig> = {
     accentColor: 0xb8860b, // Dark goldenrod
     roofColor: 0xb8860b,
   },
+  // === FOOD RESOURCE EXTRACTION ===
+  [BuildingType.HuntingLodge]: {
+    name: "Hunting Lodge",
+    isLandmark: false,
+    size: "small",
+    baseColor: 0x654321, // Dark brown wood
+    accentColor: 0x8b4513, // Saddle brown
+    roofColor: 0x556b2f, // Dark olive green
+  },
+  [BuildingType.FishingHut]: {
+    name: "Fishing Hut",
+    isLandmark: false,
+    size: "small",
+    baseColor: 0xd4a574, // Light wood
+    accentColor: 0x8b7355, // Weathered wood
+    roofColor: 0x708090, // Slate gray
+  },
+  [BuildingType.Pasture]: {
+    name: "Pasture",
+    isLandmark: false,
+    size: "medium",
+    baseColor: 0x9acd32, // Yellow green (grass)
+    accentColor: 0x8b7355, // Brown fence
+    roofColor: 0x654321, // Dark brown (barn roof)
+  },
+  // === MATERIAL RESOURCE EXTRACTION ===
   [BuildingType.LumberCamp]: {
     name: "Lumber Camp",
     isLandmark: false,
@@ -97,13 +136,13 @@ export const BUILDING_CONFIG: Record<BuildingType, BuildingConfig> = {
     accentColor: 0x8b4513, // Saddle brown
     roofColor: 0x654321, // Dark brown
   },
-  [BuildingType.Mine]: {
-    name: "Mine",
+  [BuildingType.ClayPit]: {
+    name: "Clay Pit",
     isLandmark: false,
     size: "small",
-    baseColor: 0x708090, // Slate gray
-    accentColor: 0x2f4f4f, // Dark slate gray
-    roofColor: 0x696969,
+    baseColor: 0xb87333, // Clay brown
+    accentColor: 0x8b6914, // Dark clay
+    roofColor: 0x654321, // Dark brown
   },
   [BuildingType.Quarry]: {
     name: "Quarry",
@@ -113,13 +152,63 @@ export const BUILDING_CONFIG: Record<BuildingType, BuildingConfig> = {
     accentColor: 0x696969, // Dim gray
     roofColor: 0x778899, // Light slate gray
   },
-  [BuildingType.FishingHut]: {
-    name: "Fishing Hut",
+  [BuildingType.SaltWorks]: {
+    name: "Salt Works",
+    isLandmark: false,
+    size: "medium",
+    baseColor: 0xf5f5dc, // Beige (salt pans)
+    accentColor: 0xdcdcdc, // Gainsboro (salt)
+    roofColor: 0xa0826d, // Tan wood
+  },
+  // === MINERAL RESOURCE EXTRACTION ===
+  [BuildingType.CopperMine]: {
+    name: "Copper Mine",
+    isLandmark: false,
+    size: "medium",
+    baseColor: 0xb87333, // Copper color
+    accentColor: 0x8b4513, // Dark wood supports
+    roofColor: 0x696969, // Dim gray
+  },
+  [BuildingType.IronMine]: {
+    name: "Iron Mine",
+    isLandmark: false,
+    size: "medium",
+    baseColor: 0x708090, // Slate gray
+    accentColor: 0x2f4f4f, // Dark slate gray
+    roofColor: 0x696969, // Dim gray
+  },
+  [BuildingType.SilverMine]: {
+    name: "Silver Mine",
+    isLandmark: false,
+    size: "medium",
+    baseColor: 0xc0c0c0, // Silver
+    accentColor: 0x696969, // Dim gray
+    roofColor: 0x778899, // Light slate gray
+  },
+  [BuildingType.GoldMine]: {
+    name: "Gold Mine",
+    isLandmark: false,
+    size: "medium",
+    baseColor: 0xdaa520, // Goldenrod
+    accentColor: 0xb8860b, // Dark goldenrod
+    roofColor: 0x8b4513, // Saddle brown
+  },
+  [BuildingType.GemMine]: {
+    name: "Gem Mine",
+    isLandmark: false,
+    size: "medium",
+    baseColor: 0x9370db, // Medium purple
+    accentColor: 0x663399, // Rebecca purple
+    roofColor: 0x4b0082, // Indigo
+  },
+  // === LEGACY/OTHER ===
+  [BuildingType.Mine]: {
+    name: "Mine",
     isLandmark: false,
     size: "small",
-    baseColor: 0xd4a574, // Light wood
-    accentColor: 0x8b7355, // Weathered wood
-    roofColor: 0x708090, // Slate gray
+    baseColor: 0x708090, // Slate gray
+    accentColor: 0x2f4f4f, // Dark slate gray
+    roofColor: 0x696969,
   },
   [BuildingType.Dock]: {
     name: "Dock",

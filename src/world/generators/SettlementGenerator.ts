@@ -3,14 +3,16 @@ import { HexTile } from "../HexTile";
 import { TerrainType, VegetationType, isWater } from "../Terrain";
 import { BuildingType, Settlement, VillageSpecialization } from "../Building";
 import { WorldGenConfig } from "../WorldGenerator";
-import { SettlementPlacer } from "./SettlementPlacer";
+import { ResourceAwareSettlementPlacer, ResourceAnalysis } from "./ResourceAwareSettlementPlacer";
+import { ResourceType } from "../Resource";
+import { getPrimaryExtractionBuilding } from "../ResourceExtraction";
 
 /**
  * Handles settlement generation (cities and villages)
  */
 export class SettlementGenerator {
   private config: WorldGenConfig;
-  private placer: SettlementPlacer;
+  private placer: ResourceAwareSettlementPlacer;
   private settlements: Settlement[] = [];
   private seededRandom: (seed: number) => number;
   private hexDistance: (a: HexTile, b: HexTile) => number;
@@ -23,7 +25,7 @@ export class SettlementGenerator {
     this.config = config;
     this.seededRandom = seededRandom;
     this.hexDistance = hexDistance;
-    this.placer = new SettlementPlacer();
+    this.placer = new ResourceAwareSettlementPlacer();
   }
 
   /**
@@ -76,6 +78,7 @@ export class SettlementGenerator {
     });
 
     console.log(`Generated ${cities.length} cities, ${villages.length} villages, and ${hamlets.length} hamlets`);
+    console.log(`Cities: Resource-aware placement (exploit nearby resources)`);
     console.log(`Villages:`);
     Object.entries(villageSpecCounts).forEach(([spec, count]) => {
       console.log(`  - ${count} ${spec} village(s)`);
@@ -89,18 +92,21 @@ export class SettlementGenerator {
   }
 
   /**
-   * Attempt to place a city
+   * Attempt to place a city (resource-aware)
    */
   private tryPlaceCity(grid: Grid<HexTile>, settlementId: number): Settlement | null {
-    // Find a suitable location for a city
-    const centerTile = this.placer.findSettlementLocation(
+    // Find a suitable location for a city (resource-aware - cities prefer resource-rich areas)
+    const location = this.placer.findResourceAwareLocation(
       grid,
       "city",
       this.settlements,
       this.config,
       this.seededRandom
     );
-    if (!centerTile) return null;
+    if (!location) return null;
+
+    const centerTile = location.tile;
+    const resourceAnalysis = location.analysis;
 
     // Choose a random landmark type
     const landmarks = [
@@ -129,10 +135,26 @@ export class SettlementGenerator {
     // Determine city size (more tiles: 8-15 total including center)
     const numTiles = Math.floor(this.seededRandom(settlementId * 2.3) * 8) + 7; // 7-14 additional tiles
 
-    // Place city houses around the landmark
-    let placedTiles = 0;
+    // FIRST: Place extraction buildings on nearby resources (shows why city is here!)
+    // Cities exploit MORE resources than villages (economic diversity)
+    const extractionTiles = this.placeExtractionBuildings(
+      grid,
+      centerTile,
+      resourceAnalysis,
+      settlementId,
+      VillageSpecialization.Generic, // Cities don't have specialization
+      true // isCity flag - exploit more resources
+    );
+    
+    let placedTiles = extractionTiles.length;
+    tiles.push(...extractionTiles);
+
+    // THEN: Place city houses and other buildings around the landmark
     for (const neighbor of neighbors) {
       if (placedTiles >= numTiles) break;
+
+      // Skip if already has a building (from extraction placement)
+      if (neighbor.building !== BuildingType.None) continue;
 
       // Only place on suitable terrain
       if (!this.placer.isSuitableForBuilding(neighbor)) continue;
@@ -146,7 +168,19 @@ export class SettlementGenerator {
           settlementId * 5.1 + neighbor.col * 0.3 + neighbor.row * 0.7,
         ) < chance
       ) {
-        neighbor.building = BuildingType.CityHouse;
+        // Mix of city houses (80%), warehouses (15%), and trading posts (5%)
+        const buildingRoll = this.seededRandom(settlementId * 7.9 + neighbor.col + neighbor.row);
+        let building: BuildingType;
+        
+        if (buildingRoll < 0.8) {
+          building = BuildingType.CityHouse;
+        } else if (buildingRoll < 0.95) {
+          building = BuildingType.Warehouse;
+        } else {
+          building = BuildingType.TradingPost;
+        }
+
+        neighbor.building = building;
         neighbor.vegetation = VegetationType.None;
         neighbor.isRough = false;
         neighbor.settlementId = settlementId;
@@ -167,26 +201,30 @@ export class SettlementGenerator {
    * Attempt to place a village
    */
   private tryPlaceVillage(grid: Grid<HexTile>, settlementId: number): Settlement | null {
-    // Find a suitable location for a village
-    const centerTile = this.placer.findSettlementLocation(
+    // Find a suitable location for a village (resource-aware)
+    const location = this.placer.findResourceAwareLocation(
       grid,
       "village",
       this.settlements,
       this.config,
       this.seededRandom
     );
-    if (!centerTile) return null;
+    if (!location) return null;
 
-    // Determine specialization based on nearby terrain
-    const specialization = this.determineVillageSpecialization(
+    const centerTile = location.tile;
+    const resourceAnalysis = location.analysis;
+
+    // Determine specialization based on nearby resources AND terrain
+    const specialization = this.determineVillageSpecializationFromResources(
       grid,
       centerTile,
+      resourceAnalysis,
       settlementId,
     );
 
     // Get landmark and primary building for this specialization
     const { landmark, primaryBuilding, secondaryBuilding } =
-      this.getBuildingsForSpecialization(specialization);
+      this.getBuildingsForSpecialization(specialization, resourceAnalysis.dominantResource);
 
     // Place the primary building in the center (or landmark if applicable)
     centerTile.building = landmark || primaryBuilding;
@@ -205,10 +243,27 @@ export class SettlementGenerator {
     const numAdditionalTiles =
       Math.floor(this.seededRandom(settlementId * 1.9) * 4) + 3;
 
-    // Place buildings based on specialization
+    // Place buildings based on specialization AND nearby resources
     let placedTiles = 0;
+    
+    // First, try to place extraction buildings on resource tiles
+    const resourceBuildings = this.placeExtractionBuildings(
+      grid,
+      centerTile,
+      resourceAnalysis,
+      settlementId,
+      specialization,
+      false // isCity = false for villages
+    );
+    placedTiles += resourceBuildings.length;
+    tiles.push(...resourceBuildings);
+
+    // Then place regular village buildings
     for (const neighbor of neighbors) {
       if (placedTiles >= numAdditionalTiles) break;
+
+      // Skip if already has a building
+      if (neighbor.building !== BuildingType.None) continue;
 
       // Special handling for fishing villages - allow shore tiles
       const isFishingVillage = specialization === VillageSpecialization.Fishing;
@@ -274,7 +329,67 @@ export class SettlementGenerator {
   }
 
   /**
-   * Determine village specialization based on nearby terrain
+   * Determine village specialization based on nearby resources (NEW - resource-aware)
+   */
+  private determineVillageSpecializationFromResources(
+    grid: Grid<HexTile>,
+    centerTile: HexTile,
+    resourceAnalysis: ResourceAnalysis,
+    settlementId: number,
+  ): VillageSpecialization {
+    // If we have a dominant resource, specialize based on it
+    if (resourceAnalysis.dominantResource) {
+      const dominant = resourceAnalysis.dominantResource;
+      const count = resourceAnalysis.resourceCounts.get(dominant) || 0;
+
+      // Need at least 2 resources to justify specialization
+      if (count >= 2) {
+        // Fish → Fishing village
+        if (dominant === ResourceType.Fish) {
+          return VillageSpecialization.Fishing;
+        }
+
+        // Metals → Mining village
+        if (
+          [
+            ResourceType.Copper,
+            ResourceType.Iron,
+            ResourceType.Silver,
+            ResourceType.Gold,
+            ResourceType.Gems,
+          ].includes(dominant)
+        ) {
+          return VillageSpecialization.Mining;
+        }
+
+        // Stone → Mining village (quarry)
+        if (dominant === ResourceType.Stone) {
+          return VillageSpecialization.Mining;
+        }
+
+        // Timber → Lumber village
+        if (dominant === ResourceType.Timber) {
+          return VillageSpecialization.Lumber;
+        }
+
+        // Wild Game → Lumber village (hunting/forestry)
+        if (dominant === ResourceType.WildGame) {
+          return VillageSpecialization.Lumber;
+        }
+
+        // Salt → Trading (valuable commodity)
+        if (dominant === ResourceType.Salt) {
+          return VillageSpecialization.Trading;
+        }
+      }
+    }
+
+    // Fall back to terrain-based specialization
+    return this.determineVillageSpecialization(grid, centerTile, settlementId);
+  }
+
+  /**
+   * Determine village specialization based on nearby terrain (ORIGINAL - terrain-based fallback)
    */
   private determineVillageSpecialization(
     grid: Grid<HexTile>,
@@ -330,13 +445,28 @@ export class SettlementGenerator {
   }
 
   /**
-   * Get building types for a village specialization
+   * Get building types for a village specialization (updated to consider resources)
    */
-  private getBuildingsForSpecialization(specialization: VillageSpecialization): {
+  private getBuildingsForSpecialization(
+    specialization: VillageSpecialization,
+    dominantResource?: ResourceType | null
+  ): {
     landmark: BuildingType | undefined;
     primaryBuilding: BuildingType;
     secondaryBuilding: BuildingType;
   } {
+    // For mining villages, use resource-specific mine if available
+    if (specialization === VillageSpecialization.Mining && dominantResource) {
+      const specificMine = getPrimaryExtractionBuilding(dominantResource);
+      if (specificMine && specificMine !== BuildingType.Mine) {
+        return {
+          landmark: undefined,
+          primaryBuilding: specificMine,
+          secondaryBuilding: BuildingType.Quarry,
+        };
+      }
+    }
+
     switch (specialization) {
       case VillageSpecialization.Fishing:
         return {
@@ -391,48 +521,136 @@ export class SettlementGenerator {
   }
 
   /**
+   * Place extraction buildings on tiles with resources nearby
+   */
+  private placeExtractionBuildings(
+    grid: Grid<HexTile>,
+    centerTile: HexTile,
+    resourceAnalysis: ResourceAnalysis,
+    settlementId: number,
+    specialization: VillageSpecialization,
+    isCity: boolean = false
+  ): Array<{ col: number; row: number }> {
+    const placedTiles: Array<{ col: number; row: number }> = [];
+
+    // Group resources by type and sort by quality (best first)
+    const resourcesByType = new Map<ResourceType, Array<{ tile: HexTile; quality: number }>>();
+    for (const { tile, resource, quality } of resourceAnalysis.resourceTiles) {
+      if (!resourcesByType.has(resource)) {
+        resourcesByType.set(resource, []);
+      }
+      resourcesByType.get(resource)!.push({ tile, quality });
+    }
+
+    // Sort each resource group by quality (excellent first)
+    for (const [_, tiles] of resourcesByType.entries()) {
+      tiles.sort((a, b) => b.quality - a.quality);
+    }
+
+    // For each resource type, try to place extraction buildings
+    for (const [resourceType, resourceTiles] of resourcesByType.entries()) {
+      const extractionBuilding = getPrimaryExtractionBuilding(resourceType);
+      if (!extractionBuilding) continue;
+
+      // Determine how many extraction buildings to place
+      const count = resourceTiles.length;
+      // Cities place more extraction buildings (they're economic hubs)
+      const numBuildings = isCity 
+        ? Math.min(count, Math.ceil(count * 0.7)) // Cities: exploit 70% of nearby resources
+        : count >= 4 ? 2 : 1; // Villages/hamlets: 1-2 buildings
+
+      // Place extraction buildings (highest quality first)
+      let placed = 0;
+      for (const { tile: resourceTile, quality } of resourceTiles) {
+        if (placed >= numBuildings) break;
+
+        // Find suitable location (ON resource if possible)
+        const buildingTile = this.placer.findExtractionBuildingLocation(
+          grid,
+          resourceTile,
+          settlementId
+        );
+
+        if (buildingTile) {
+          buildingTile.building = extractionBuilding;
+          buildingTile.vegetation = VegetationType.None;
+          buildingTile.isRough = false;
+          buildingTile.settlementId = settlementId;
+          placedTiles.push({ col: buildingTile.col, row: buildingTile.row });
+          placed++;
+        }
+      }
+    }
+
+    return placedTiles;
+  }
+
+  /**
    * Attempt to place a hamlet (very small settlement, 1-2 tiles)
    */
   private tryPlaceHamlet(grid: Grid<HexTile>, settlementId: number): Settlement | null {
-    // Find a suitable location for a hamlet
-    const centerTile = this.placer.findSettlementLocation(
+    // Find a suitable location for a hamlet (resource-aware)
+    const location = this.placer.findResourceAwareLocation(
       grid,
       "hamlet",
       this.settlements,
       this.config,
       this.seededRandom
     );
-    if (!centerTile) return null;
+    if (!location) return null;
 
-    // Determine specialization (hamlets are more likely to be generic or specialized)
-    const specialization = this.determineVillageSpecialization(
+    const centerTile = location.tile;
+    const resourceAnalysis = location.analysis;
+
+    // Determine specialization based on resources
+    const specialization = this.determineVillageSpecializationFromResources(
       grid,
       centerTile,
+      resourceAnalysis,
       settlementId,
     );
 
     // Get buildings for this specialization
-    const { primaryBuilding } = this.getBuildingsForSpecialization(specialization);
+    const { primaryBuilding } = this.getBuildingsForSpecialization(
+      specialization,
+      resourceAnalysis.dominantResource
+    );
 
-    // Decide hamlet composition:
-    // 40% - just a house
-    // 30% - just a specialized building (mine, lumbercamp, etc.)
-    // 30% - house + specialized building
+    // Decide hamlet composition based on resources:
+    // If there's a good resource nearby (score > 2), prioritize extraction
+    // Otherwise, just a house or mixed
     const compositionRoll = this.seededRandom(settlementId * 11.7);
+    const hasGoodResource = resourceAnalysis.score > 2;
     
     let centerBuilding: BuildingType;
     let hasSecondBuilding = false;
     
-    if (compositionRoll < 0.4) {
-      // Just a house
-      centerBuilding = BuildingType.House;
-    } else if (compositionRoll < 0.7) {
-      // Just a specialized building
-      centerBuilding = primaryBuilding;
+    if (hasGoodResource) {
+      // Resource-focused hamlet
+      if (compositionRoll < 0.6) {
+        // 60% - just an extraction building (pure resource hamlet)
+        const extractionBuilding = resourceAnalysis.dominantResource
+          ? getPrimaryExtractionBuilding(resourceAnalysis.dominantResource)
+          : null;
+        centerBuilding = extractionBuilding || primaryBuilding;
+      } else {
+        // 40% - house + extraction building
+        centerBuilding = BuildingType.House;
+        hasSecondBuilding = true;
+      }
     } else {
-      // House + specialized building
-      centerBuilding = BuildingType.House;
-      hasSecondBuilding = true;
+      // Generic hamlet (no good resources)
+      if (compositionRoll < 0.5) {
+        // 50% - just a house
+        centerBuilding = BuildingType.House;
+      } else if (compositionRoll < 0.8) {
+        // 30% - just a specialized building
+        centerBuilding = primaryBuilding;
+      } else {
+        // 20% - house + specialized building
+        centerBuilding = BuildingType.House;
+        hasSecondBuilding = true;
+      }
     }
 
     // Place the center building
@@ -445,36 +663,61 @@ export class SettlementGenerator {
       { col: centerTile.col, row: centerTile.row },
     ];
 
-    // If hamlet has a second building, try to place it adjacent
+    // If hamlet has a second building, try to place it adjacent (preferably on a resource)
     if (hasSecondBuilding) {
-      const neighbors = this.placer.getNeighborsInRange(grid, centerTile, 1);
+      // First, try to place an extraction building on a nearby resource
+      let placedExtraction = false;
       
-      for (const neighbor of neighbors) {
-        // Special handling for fishing hamlets - allow shore tiles
-        const isFishingHamlet = specialization === VillageSpecialization.Fishing;
-        if (isFishingHamlet && neighbor.terrain === TerrainType.Shore) {
-          // OK for fishing hamlet
-        } else if (!this.placer.isSuitableForBuilding(neighbor)) {
-          continue;
-        }
-
-        // Place the specialized building
-        let building = primaryBuilding;
+      if (resourceAnalysis.totalResources > 0) {
+        const extractionTiles = this.placeExtractionBuildings(
+          grid,
+          centerTile,
+          resourceAnalysis,
+          settlementId,
+          specialization,
+          false // isCity = false for hamlets
+        );
         
-        // Special case: fishing hamlets on shore should use fishing huts
-        if (
-          isFishingHamlet &&
-          neighbor.terrain === TerrainType.Shore
-        ) {
-          building = BuildingType.FishingHut;
+        if (extractionTiles.length > 0) {
+          tiles.push(extractionTiles[0]); // Just one extraction building for hamlets
+          placedExtraction = true;
         }
+      }
 
-        neighbor.building = building;
-        neighbor.vegetation = VegetationType.None;
-        neighbor.isRough = false;
-        neighbor.settlementId = settlementId;
-        tiles.push({ col: neighbor.col, row: neighbor.row });
-        break; // Only add one additional building
+      // If we didn't place an extraction building, place a generic specialized building
+      if (!placedExtraction) {
+        const neighbors = this.placer.getNeighborsInRange(grid, centerTile, 1);
+        
+        for (const neighbor of neighbors) {
+          // Skip if already has a building
+          if (neighbor.building !== BuildingType.None) continue;
+
+          // Special handling for fishing hamlets - allow shore tiles
+          const isFishingHamlet = specialization === VillageSpecialization.Fishing;
+          if (isFishingHamlet && neighbor.terrain === TerrainType.Shore) {
+            // OK for fishing hamlet
+          } else if (!this.placer.isSuitableForBuilding(neighbor)) {
+            continue;
+          }
+
+          // Place the specialized building
+          let building = primaryBuilding;
+          
+          // Special case: fishing hamlets on shore should use fishing huts
+          if (
+            isFishingHamlet &&
+            neighbor.terrain === TerrainType.Shore
+          ) {
+            building = BuildingType.FishingHut;
+          }
+
+          neighbor.building = building;
+          neighbor.vegetation = VegetationType.None;
+          neighbor.isRough = false;
+          neighbor.settlementId = settlementId;
+          tiles.push({ col: neighbor.col, row: neighbor.row });
+          break; // Only add one additional building
+        }
       }
     }
 

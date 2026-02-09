@@ -25,8 +25,11 @@ export class CharacterRenderer {
   /** Current movement speed (can be boosted for roads). */
   private currentMoveSpeed: number = 0.18;
 
-  /** Callback when character is clicked. */
-  onClick?: () => void;
+  /** Callback when character is left-clicked. */
+  onLeftClick?: () => void;
+  
+  /** Callback when character is right-clicked. */
+  onRightClick?: () => void;
 
   constructor() {
     this.container = new Container({ label: "character" });
@@ -43,7 +46,13 @@ export class CharacterRenderer {
     this.hitbox.cursor = "pointer";
     this.hitbox.on("pointerdown", (e) => {
       e.stopPropagation(); // Prevent world click
-      this.onClick?.();
+      if (e.button === 0) {
+        // Left click - open character sheet
+        this.onLeftClick?.();
+      } else if (e.button === 2) {
+        // Right click - show location tooltip
+        this.onRightClick?.();
+      }
     });
     this.container.addChild(this.hitbox);
   }

@@ -16,6 +16,7 @@ import { VegetationRenderer } from "./renderers/VegetationRenderer";
 import { RoadRenderer } from "./renderers/RoadRenderer";
 import { SettlementRenderer } from "./renderers/SettlementRenderer";
 import { BuildingRenderer } from "./buildings/BuildingRenderer";
+import { ResourceRenderer } from "./renderers/ResourceRenderer";
 
 type Pt = { x: number; y: number };
 
@@ -41,6 +42,7 @@ export class TileRenderer {
   private roadRenderer = new RoadRenderer();
   private settlementRenderer = new SettlementRenderer();
   private buildingRenderer = new BuildingRenderer();
+  private resourceRenderer = new ResourceRenderer();
 
   constructor() {
     this.container = new Container({ label: "world-tiles" });
@@ -249,5 +251,30 @@ export class TileRenderer {
 
     const corners = isoCorners(hex);
     this.settlementRenderer.drawSettlementPerimeter(gfx, hex, allTiles, corners);
+  }
+
+  /** Draw resource icon on a tile */
+  drawResource(hex: HexTile): void {
+    if (!hex.resource || hex.resource.type === "none") return;
+    
+    // Don't draw resources on tiles with buildings - the building shows it's being exploited!
+    if (hex.building !== BuildingType.None) return;
+
+    const key = `${hex.col},${hex.row}`;
+    let gfx = this.decorationGraphics.get(key);
+    
+    if (!gfx) {
+      gfx = new Graphics();
+      const pos = hexIsoPosition(hex);
+      gfx.position.set(Math.round(pos.x), Math.round(pos.y));
+      this.decorationGraphics.set(key, gfx);
+      this.decorationContainer.addChild(gfx);
+    }
+
+    const corners = isoCorners(hex);
+    const cx = corners.reduce((s, c) => s + c.x, 0) / corners.length;
+    const cy = corners.reduce((s, c) => s + c.y, 0) / corners.length;
+
+    this.resourceRenderer.drawResource(gfx, hex.resource.type, cx, cy);
   }
 }
