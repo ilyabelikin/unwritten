@@ -60,14 +60,17 @@ export class WorldGenerator implements IPathfindingMap {
 
   constructor(config: Partial<WorldGenConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-    
+
     // Initialize generators
     this.terrainGenerator = new TerrainGenerator(this.config, this.config.seed);
-    this.vegetationGenerator = new VegetationGenerator(this.config, this.config.seed);
+    this.vegetationGenerator = new VegetationGenerator(
+      this.config,
+      this.config.seed,
+    );
     this.settlementGenerator = new SettlementGenerator(
       this.config,
       this.seededRandom.bind(this),
-      this.hexDistance.bind(this)
+      this.hexDistance.bind(this),
     );
   }
 
@@ -94,33 +97,33 @@ export class WorldGenerator implements IPathfindingMap {
       rectangle({ width: this.config.width, height: this.config.height }),
     );
 
-    console.log('[WorldGenerator] Starting world generation...');
+    console.log("[WorldGenerator] Starting world generation...");
 
     // Pass 1: Generate elevation and base terrain
-    console.log('[WorldGenerator] Pass 1: Terrain generation');
+    console.log("[WorldGenerator] Pass 1: Terrain generation");
     this.terrainGenerator.generateTerrain(this.grid);
 
     // Pass 2: Convert land tiles adjacent to water into shores
-    console.log('[WorldGenerator] Pass 2: Shore generation');
+    console.log("[WorldGenerator] Pass 2: Shore generation");
     this.terrainGenerator.applyShores(this.grid);
 
     // Pass 3: Scatter vegetation on eligible tiles
-    console.log('[WorldGenerator] Pass 3: Vegetation');
+    console.log("[WorldGenerator] Pass 3: Vegetation");
     this.vegetationGenerator.applyVegetation(this.grid);
 
     // Pass 4: Mark rough terrain patches
-    console.log('[WorldGenerator] Pass 4: Rough terrain');
+    console.log("[WorldGenerator] Pass 4: Rough terrain");
     this.vegetationGenerator.applyRoughTerrain(this.grid);
 
     // Pass 5: Generate settlements (cities and villages)
-    console.log('[WorldGenerator] Pass 5: Settlements');
+    console.log("[WorldGenerator] Pass 5: Settlements");
     this.settlements = this.settlementGenerator.generateSettlements(this.grid);
 
     // Pass 6: Generate roads connecting settlements
-    console.log('[WorldGenerator] Pass 6: Roads');
+    console.log("[WorldGenerator] Pass 6: Roads");
     this.generateRoads(this.grid);
 
-    console.log('[WorldGenerator] World generation complete!');
+    console.log("[WorldGenerator] World generation complete!");
 
     return this.grid;
   }

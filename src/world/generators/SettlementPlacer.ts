@@ -13,12 +13,12 @@ export class SettlementPlacer {
    */
   findSettlementLocation(
     grid: Grid<HexTile>,
-    type: "city" | "village",
+    type: "city" | "village" | "hamlet",
     settlements: Settlement[],
     config: { width: number; height: number },
     seededRandom: (seed: number) => number
   ): HexTile | null {
-    const minDistance = type === "city" ? 20 : 12;
+    const minDistance = type === "city" ? 20 : type === "village" ? 12 : 5;
     const maxAttempts = 100;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {

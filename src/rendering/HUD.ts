@@ -198,9 +198,12 @@ export class HUD {
 
     // Add settlement information if present
     if (settlement) {
-      const settlementType = settlement.type === "city" ? "City" : "Village";
+      const settlementType = 
+        settlement.type === "city" ? "City" : 
+        settlement.type === "hamlet" ? "Hamlet" : 
+        "Village";
       const tileCount = settlement.tiles.length;
-      text += `\n• ${settlementType} (${tileCount} tiles)`;
+      text += `\n• ${settlementType} (${tileCount} tile${tileCount > 1 ? "s" : ""})`;
 
       // Show landmark for cities
       if (settlement.type === "city" && settlement.landmark) {

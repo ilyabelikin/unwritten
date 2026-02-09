@@ -253,9 +253,9 @@ export enum VillageSpecialization {
  * Represents a settlement (village or city).
  */
 export interface Settlement {
-  /** Type: 'village' or 'city' */
-  type: "village" | "city";
-  /** Village specialization (only for villages) */
+  /** Type: 'village', 'city', or 'hamlet' */
+  type: "village" | "city" | "hamlet";
+  /** Village specialization (only for villages and hamlets) */
   specialization?: VillageSpecialization;
   /** Central tile (col, row) */
   center: { col: number; row: number };

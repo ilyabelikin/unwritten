@@ -27,7 +27,7 @@ export class SettlementGenerator {
   }
 
   /**
-   * Generate all settlements (cities and villages)
+   * Generate all settlements (cities, villages, and hamlets)
    */
   generateSettlements(grid: Grid<HexTile>): Settlement[] {
     this.settlements = [];
@@ -49,19 +49,40 @@ export class SettlementGenerator {
       }
     }
 
+    // Generate hamlets (tiny, 1-2 tiles)
+    for (let i = 0; i < this.config.numHamlets; i++) {
+      const hamlet = this.tryPlaceHamlet(grid, settlementId++);
+      if (hamlet) {
+        this.settlements.push(hamlet);
+      }
+    }
+
     const cities = this.settlements.filter((s) => s.type === "city");
     const villages = this.settlements.filter((s) => s.type === "village");
+    const hamlets = this.settlements.filter((s) => s.type === "hamlet");
 
     // Count village specializations
-    const specializationCounts: Record<string, number> = {};
+    const villageSpecCounts: Record<string, number> = {};
     villages.forEach((v) => {
       const spec = v.specialization || VillageSpecialization.Generic;
-      specializationCounts[spec] = (specializationCounts[spec] || 0) + 1;
+      villageSpecCounts[spec] = (villageSpecCounts[spec] || 0) + 1;
     });
 
-    console.log(`Generated ${cities.length} cities and ${villages.length} villages:`);
-    Object.entries(specializationCounts).forEach(([spec, count]) => {
+    // Count hamlet specializations
+    const hamletSpecCounts: Record<string, number> = {};
+    hamlets.forEach((h) => {
+      const spec = h.specialization || VillageSpecialization.Generic;
+      hamletSpecCounts[spec] = (hamletSpecCounts[spec] || 0) + 1;
+    });
+
+    console.log(`Generated ${cities.length} cities, ${villages.length} villages, and ${hamlets.length} hamlets`);
+    console.log(`Villages:`);
+    Object.entries(villageSpecCounts).forEach(([spec, count]) => {
       console.log(`  - ${count} ${spec} village(s)`);
+    });
+    console.log(`Hamlets:`);
+    Object.entries(hamletSpecCounts).forEach(([spec, count]) => {
+      console.log(`  - ${count} ${spec} hamlet(s)`);
     });
 
     return this.settlements;
@@ -367,5 +388,101 @@ export class SettlementGenerator {
           secondaryBuilding: BuildingType.House,
         };
     }
+  }
+
+  /**
+   * Attempt to place a hamlet (very small settlement, 1-2 tiles)
+   */
+  private tryPlaceHamlet(grid: Grid<HexTile>, settlementId: number): Settlement | null {
+    // Find a suitable location for a hamlet
+    const centerTile = this.placer.findSettlementLocation(
+      grid,
+      "hamlet",
+      this.settlements,
+      this.config,
+      this.seededRandom
+    );
+    if (!centerTile) return null;
+
+    // Determine specialization (hamlets are more likely to be generic or specialized)
+    const specialization = this.determineVillageSpecialization(
+      grid,
+      centerTile,
+      settlementId,
+    );
+
+    // Get buildings for this specialization
+    const { primaryBuilding } = this.getBuildingsForSpecialization(specialization);
+
+    // Decide hamlet composition:
+    // 40% - just a house
+    // 30% - just a specialized building (mine, lumbercamp, etc.)
+    // 30% - house + specialized building
+    const compositionRoll = this.seededRandom(settlementId * 11.7);
+    
+    let centerBuilding: BuildingType;
+    let hasSecondBuilding = false;
+    
+    if (compositionRoll < 0.4) {
+      // Just a house
+      centerBuilding = BuildingType.House;
+    } else if (compositionRoll < 0.7) {
+      // Just a specialized building
+      centerBuilding = primaryBuilding;
+    } else {
+      // House + specialized building
+      centerBuilding = BuildingType.House;
+      hasSecondBuilding = true;
+    }
+
+    // Place the center building
+    centerTile.building = centerBuilding;
+    centerTile.vegetation = VegetationType.None;
+    centerTile.isRough = false;
+    centerTile.settlementId = settlementId;
+
+    const tiles: Array<{ col: number; row: number }> = [
+      { col: centerTile.col, row: centerTile.row },
+    ];
+
+    // If hamlet has a second building, try to place it adjacent
+    if (hasSecondBuilding) {
+      const neighbors = this.placer.getNeighborsInRange(grid, centerTile, 1);
+      
+      for (const neighbor of neighbors) {
+        // Special handling for fishing hamlets - allow shore tiles
+        const isFishingHamlet = specialization === VillageSpecialization.Fishing;
+        if (isFishingHamlet && neighbor.terrain === TerrainType.Shore) {
+          // OK for fishing hamlet
+        } else if (!this.placer.isSuitableForBuilding(neighbor)) {
+          continue;
+        }
+
+        // Place the specialized building
+        let building = primaryBuilding;
+        
+        // Special case: fishing hamlets on shore should use fishing huts
+        if (
+          isFishingHamlet &&
+          neighbor.terrain === TerrainType.Shore
+        ) {
+          building = BuildingType.FishingHut;
+        }
+
+        neighbor.building = building;
+        neighbor.vegetation = VegetationType.None;
+        neighbor.isRough = false;
+        neighbor.settlementId = settlementId;
+        tiles.push({ col: neighbor.col, row: neighbor.row });
+        break; // Only add one additional building
+      }
+    }
+
+    return {
+      type: "hamlet",
+      specialization,
+      center: { col: centerTile.col, row: centerTile.row },
+      tiles,
+    };
   }
 }

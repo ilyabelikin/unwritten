@@ -40,11 +40,26 @@ export class Game {
   constructor(app: Application) {
     this.app = app;
 
+    // Parse URL parameters
+    const params = new URLSearchParams(window.location.search);
+    
     // Check for debug mode in URL
-    this.debugMode = new URLSearchParams(window.location.search).has('debug_mode');
+    this.debugMode = params.has('debug_mode');
     if (this.debugMode) {
       console.log('[Debug Mode] Enabled - Press R to toggle roads');
     }
+
+    // Get or generate seed
+    let seed = params.get('seed');
+    if (!seed) {
+      // Generate random seed if none provided
+      seed = "unwritten-" + Math.floor(Math.random() * 10000);
+    }
+    
+    // Update URL with seed parameter (as first parameter)
+    this.updateURLWithSeed(seed);
+    
+    console.log(`[Unwritten] World Seed: ${seed}`);
 
     // Create the world container
     this.worldContainer = new Container({ label: "world" });
@@ -54,7 +69,7 @@ export class Game {
     this.worldMap = new WorldMap({
       width: 120,
       height: 120,
-      seed: "unwritten-" + Math.floor(Math.random() * 10000),
+      seed: seed,
     });
 
     // Set up rendering (order matters for z-index)
@@ -306,6 +321,29 @@ export class Game {
 
   /** Are roads currently hidden in debug mode? */
   private roadsHidden: boolean = false;
+
+  /**
+   * Update the browser URL with the seed parameter (as first parameter).
+   * Preserves other parameters like debug_mode.
+   */
+  private updateURLWithSeed(seed: string): void {
+    const currentParams = new URLSearchParams(window.location.search);
+    const newParams = new URLSearchParams();
+    
+    // Add seed as the first parameter
+    newParams.set('seed', seed);
+    
+    // Add all other existing parameters (except seed if it already exists)
+    currentParams.forEach((value, key) => {
+      if (key !== 'seed') {
+        newParams.set(key, value);
+      }
+    });
+    
+    // Update URL without reloading the page
+    const newURL = `${window.location.pathname}?${newParams.toString()}`;
+    window.history.replaceState({}, '', newURL);
+  }
 
   private handleSelectClick(worldX: number, worldY: number): void {
     const hex = this.findHexAtPoint(worldX, worldY);
