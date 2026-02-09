@@ -104,7 +104,7 @@ export function hexIsoCenter(hex: HexTile): { x: number; y: number } {
  */
 export function isoToFlat(
   isoX: number,
-  isoY: number
+  isoY: number,
 ): { x: number; y: number } {
   return { x: isoX, y: isoY / ISO_Y_SCALE };
 }
@@ -116,11 +116,11 @@ export function isoToFlat(
 export function darkenColor(color: number, factor: number): number {
   const r = Math.max(
     0,
-    Math.min(255, Math.floor(((color >> 16) & 0xff) * factor))
+    Math.min(255, Math.floor(((color >> 16) & 0xff) * factor)),
   );
   const g = Math.max(
     0,
-    Math.min(255, Math.floor(((color >> 8) & 0xff) * factor))
+    Math.min(255, Math.floor(((color >> 8) & 0xff) * factor)),
   );
   const b = Math.max(0, Math.min(255, Math.floor((color & 0xff) * factor)));
   return (r << 16) | (g << 8) | b;
@@ -132,15 +132,17 @@ export function darkenColor(color: number, factor: number): number {
 export function lightenColor(color: number, factor: number): number {
   const r = Math.min(
     255,
-    Math.floor(((color >> 16) & 0xff) + (255 - ((color >> 16) & 0xff)) * factor)
+    Math.floor(
+      ((color >> 16) & 0xff) + (255 - ((color >> 16) & 0xff)) * factor,
+    ),
   );
   const g = Math.min(
     255,
-    Math.floor(((color >> 8) & 0xff) + (255 - ((color >> 8) & 0xff)) * factor)
+    Math.floor(((color >> 8) & 0xff) + (255 - ((color >> 8) & 0xff)) * factor),
   );
   const b = Math.min(
     255,
-    Math.floor((color & 0xff) + (255 - (color & 0xff)) * factor)
+    Math.floor((color & 0xff) + (255 - (color & 0xff)) * factor),
   );
   return (r << 16) | (g << 8) | b;
 }

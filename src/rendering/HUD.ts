@@ -1,7 +1,8 @@
 import { Container, Graphics, Text, TextStyle } from "pixi.js";
 import { Palette } from "./Palette";
 import { MAX_AP } from "../entity/Character";
-import { TERRAIN_CONFIG, TerrainType } from "../world/Terrain";
+import { TERRAIN_CONFIG, TerrainType, VegetationType } from "../world/Terrain";
+import { BuildingType, BUILDING_CONFIG, Settlement } from "../world/Building";
 
 /**
  * Heads-Up Display — overlays AP counter, turn info, terrain tooltip,
@@ -19,6 +20,10 @@ export class HUD {
   private endTurnButton: Container;
   private endTurnBg: Graphics;
   private endTurnText: Text;
+  private messageContainer: Container;
+  private messageBg: Graphics;
+  private messageText: Text;
+  private messageTimer: number = 0;
 
   /** Callback when End Turn is clicked. */
   onEndTurn?: () => void;
@@ -101,6 +106,22 @@ export class HUD {
 
     this.container.addChild(this.endTurnButton);
 
+    // -- Message Display (for feedback like "Not enough AP!") --
+    this.messageContainer = new Container({ label: "message" });
+    this.messageContainer.visible = false;
+
+    this.messageBg = new Graphics();
+    this.messageContainer.addChild(this.messageBg);
+
+    this.messageText = new Text({
+      text: "",
+      style: this.messageStyle(),
+    });
+    this.messageText.position.set(12, 8);
+    this.messageContainer.addChild(this.messageText);
+
+    this.container.addChild(this.messageContainer);
+
     // Position elements
     this.layout();
   }
@@ -118,14 +139,76 @@ export class HUD {
     this.turnText.text = `Turn ${turn}`;
   }
 
-  /** Show terrain tooltip at a screen position. */
+  /** Show terrain tooltip in a fixed position under the minimap. */
   showTooltip(
     terrain: TerrainType,
-    screenX: number,
-    screenY: number
+    isRough: boolean,
+    movementCost: number | null,
+    currentAP: number,
+    building?: BuildingType,
+    settlement?: Settlement,
+    vegetation?: VegetationType,
+    treeDensity?: number,
   ): void {
     const config = TERRAIN_CONFIG[terrain];
-    const text = `${config.name}  (${config.apCost} AP)`;
+    const roughSuffix = isRough ? " (Rough)" : "";
+
+    // Build tooltip text with movement cost if provided
+    let text = `${config.name}${roughSuffix}`;
+    if (movementCost !== null) {
+      const canAfford = movementCost <= currentAP;
+      const costColor = canAfford ? "" : " (!)";
+      text += `  [${movementCost} AP${costColor}]`;
+    }
+
+    // Add vegetation information if present
+    if (vegetation && vegetation !== VegetationType.None) {
+      if (vegetation === VegetationType.Bush) {
+        text += `\n• Shrub`;
+      } else if (
+        vegetation === VegetationType.Tree &&
+        treeDensity !== undefined
+      ) {
+        // Describe forest density
+        let forestType: string;
+        if (treeDensity < 0.2) {
+          forestType = "Sparse Trees";
+        } else if (treeDensity < 0.4) {
+          forestType = "Light Woods";
+        } else if (treeDensity < 0.6) {
+          forestType = "Light Forest";
+        } else if (treeDensity < 0.75) {
+          forestType = "Forest";
+        } else if (treeDensity < 0.9) {
+          forestType = "Dense Forest";
+        } else {
+          forestType = "Very Dense Forest";
+        }
+        // Mark dense forests (>= 0.6) as rough terrain
+        const roughSuffix = treeDensity >= 0.6 ? " (Rough)" : "";
+        text += `\n• ${forestType}${roughSuffix}`;
+      }
+    }
+
+    // Add building information if present
+    if (building && building !== BuildingType.None) {
+      const buildingConfig = BUILDING_CONFIG[building];
+      text += `\n• ${buildingConfig.name}`;
+    }
+
+    // Add settlement information if present
+    if (settlement) {
+      const settlementType = settlement.type === "city" ? "City" : "Village";
+      const tileCount = settlement.tiles.length;
+      text += `\n• ${settlementType} (${tileCount} tiles)`;
+
+      // Show landmark for cities
+      if (settlement.type === "city" && settlement.landmark) {
+        const landmarkConfig = BUILDING_CONFIG[settlement.landmark];
+        text += `\n  Landmark: ${landmarkConfig.name}`;
+      }
+    }
+
     this.tooltipText.text = text;
 
     // Redraw background to fit text
@@ -137,12 +220,15 @@ export class HUD {
     this.tooltipBg.roundRect(0, 0, w, h, 3);
     this.tooltipBg.stroke({ color: Palette.hexOutlineLight, width: 1 });
 
-    // Position tooltip near cursor but keep on screen
-    let tx = screenX + 16;
-    let ty = screenY - 10;
-    if (tx + w > this.screenWidth) tx = screenX - w - 8;
-    if (ty + h > this.screenHeight) ty = screenY - h - 8;
-    if (ty < 0) ty = 4;
+    // Position tooltip in a fixed location under the minimap
+    // Minimap is 200x200 at (screenWidth - 200 - 20, 20)
+    const miniMapWidth = 200;
+    const miniMapHeight = 200;
+    const miniMapPadding = 20;
+    const tooltipSpacing = 10;
+
+    const tx = this.screenWidth - miniMapWidth - miniMapPadding;
+    const ty = miniMapPadding + miniMapHeight + tooltipSpacing;
 
     this.tooltipContainer.position.set(tx, ty);
     this.tooltipContainer.visible = true;
@@ -151,6 +237,36 @@ export class HUD {
   /** Hide the terrain tooltip. */
   hideTooltip(): void {
     this.tooltipContainer.visible = false;
+  }
+
+  /** Show a temporary message (e.g., "Not enough AP!"). */
+  showMessage(text: string, durationSeconds: number = 2): void {
+    this.messageText.text = text;
+
+    // Redraw background to fit text
+    this.messageBg.clear();
+    const w = this.messageText.width + 24;
+    const h = this.messageText.height + 16;
+    this.messageBg.roundRect(0, 0, w, h, 4);
+    this.messageBg.fill({ color: 0x8b2020, alpha: 0.9 });
+    this.messageBg.roundRect(0, 0, w, h, 4);
+    this.messageBg.stroke({ color: 0xe85040, width: 2 });
+
+    // Center at top of screen
+    this.messageContainer.position.set((this.screenWidth - w) / 2, 60);
+
+    this.messageContainer.visible = true;
+    this.messageTimer = durationSeconds;
+  }
+
+  /** Update message timer (call from game loop). */
+  update(dt: number): void {
+    if (this.messageTimer > 0) {
+      this.messageTimer -= dt;
+      if (this.messageTimer <= 0) {
+        this.messageContainer.visible = false;
+      }
+    }
   }
 
   /** Handle screen resize. */
@@ -165,7 +281,7 @@ export class HUD {
     // End Turn button: bottom-right corner
     this.endTurnButton.position.set(
       this.screenWidth - 120,
-      this.screenHeight - 52
+      this.screenHeight - 52,
     );
   }
 
@@ -214,6 +330,15 @@ export class HUD {
       fontFamily: "monospace",
       fontSize: 13,
       fill: Palette.uiAccent,
+      fontWeight: "bold",
+    });
+  }
+
+  private messageStyle(): TextStyle {
+    return new TextStyle({
+      fontFamily: "monospace",
+      fontSize: 14,
+      fill: 0xffffff,
       fontWeight: "bold",
     });
   }

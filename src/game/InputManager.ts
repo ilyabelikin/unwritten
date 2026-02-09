@@ -4,16 +4,20 @@ import { Camera } from "./Camera";
 export type ClickHandler = (
   worldX: number,
   worldY: number,
-  button: number
+  button: number,
 ) => void;
 export type HoverHandler = (
   worldX: number,
   worldY: number,
   screenX: number,
-  screenY: number
+  screenY: number,
 ) => void;
 export type KeyHandler = (key: string) => void;
-export type WheelHandler = (delta: number, screenX: number, screenY: number) => void;
+export type WheelHandler = (
+  delta: number,
+  screenX: number,
+  screenY: number,
+) => void;
 
 /** Pixel threshold — if the mouse moves less than this, it's a click not a drag. */
 const DRAG_THRESHOLD = 5;
@@ -47,6 +51,9 @@ export class InputManager {
   private panStartCamY = 0;
   private didDrag = false;
 
+  /** Flag to disable input (e.g., when UI overlays are open) */
+  private enabled = true;
+
   constructor(app: Application, camera: Camera) {
     this.camera = camera;
 
@@ -59,6 +66,8 @@ export class InputManager {
 
     // ─── Pointer down ───────────────────────────────
     app.stage.on("pointerdown", (e: FederatedPointerEvent) => {
+      if (!this.enabled) return;
+
       if (e.button === 0) {
         // Left button — start potential pan
         this.isPanning = true;
@@ -79,22 +88,21 @@ export class InputManager {
 
     // ─── Pointer move ───────────────────────────────
     app.stage.on("pointermove", (e: FederatedPointerEvent) => {
+      if (!this.enabled) return;
+
       // Pan while left button is held
       if (this.isPanning) {
         const dx = e.globalX - this.panStartScreenX;
         const dy = e.globalY - this.panStartScreenY;
 
-        if (
-          !this.didDrag &&
-          Math.abs(dx) + Math.abs(dy) > DRAG_THRESHOLD
-        ) {
+        if (!this.didDrag && Math.abs(dx) + Math.abs(dy) > DRAG_THRESHOLD) {
           this.didDrag = true;
         }
 
         if (this.didDrag) {
           this.camera.setPanOffset(
             this.panStartCamX - dx,
-            this.panStartCamY - dy
+            this.panStartCamY - dy,
           );
         }
       }
@@ -108,6 +116,13 @@ export class InputManager {
 
     // ─── Pointer up ─────────────────────────────────
     app.stage.on("pointerup", (e: FederatedPointerEvent) => {
+      if (!this.enabled) {
+        // Reset panning state even when disabled
+        this.isPanning = false;
+        this.didDrag = false;
+        return;
+      }
+
       if (e.button === 0 && this.isPanning) {
         if (!this.didDrag) {
           // No drag happened — this is a left click (select)
@@ -129,6 +144,8 @@ export class InputManager {
 
     // ─── Keyboard ───────────────────────────────────
     window.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (!this.enabled) return;
+
       for (const handler of this.keyHandlers) {
         handler(e.key);
       }
@@ -136,11 +153,13 @@ export class InputManager {
 
     // ─── Mouse wheel (zoom) ─────────────────────────
     app.canvas.addEventListener("wheel", (e: WheelEvent) => {
+      if (!this.enabled) return;
+
       e.preventDefault(); // Prevent page scroll
-      
+
       // Normalize wheel delta (different browsers report different values)
       const delta = -Math.sign(e.deltaY);
-      
+
       for (const handler of this.wheelHandlers) {
         handler(delta, e.clientX, e.clientY);
       }
@@ -167,5 +186,21 @@ export class InputManager {
 
   onWheel(handler: WheelHandler): void {
     this.wheelHandlers.push(handler);
+  }
+
+  /** Enable or disable input handling. */
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+
+    // Reset panning state when disabling
+    if (!enabled) {
+      this.isPanning = false;
+      this.didDrag = false;
+    }
+  }
+
+  /** Check if input is currently enabled. */
+  isEnabled(): boolean {
+    return this.enabled;
   }
 }

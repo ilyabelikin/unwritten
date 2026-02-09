@@ -7,10 +7,14 @@ import { CharacterRenderer } from "../rendering/CharacterRenderer";
 import { HighlightOverlay } from "../rendering/HighlightOverlay";
 import { FogOfWarOverlay } from "../rendering/FogOfWarOverlay";
 import { HUD } from "../rendering/HUD";
+import { MiniMap } from "../rendering/MiniMap";
+import { PathOverlay } from "../rendering/PathOverlay";
+import { CharacterSheet } from "../rendering/CharacterSheet";
 import { hexIsoCenter, isoToFlat } from "../rendering/Isometric";
 import { Character } from "../entity/Character";
 import { Camera } from "./Camera";
 import { InputManager } from "./InputManager";
+import { findPath, isPathValid } from "../pathfinding/Pathfinding";
 
 /**
  * Main Game class — orchestrates world generation, rendering, input, and game loop.
@@ -22,7 +26,10 @@ export class Game {
   private characterRenderer: CharacterRenderer;
   private highlightOverlay: HighlightOverlay;
   private fogOverlay: FogOfWarOverlay;
+  private pathOverlay: PathOverlay;
   private hud: HUD;
+  private miniMap: MiniMap;
+  private characterSheet: CharacterSheet;
   private character: Character;
   private camera: Camera;
   private input: InputManager;
@@ -45,11 +52,22 @@ export class Game {
     });
 
     // Set up rendering (order matters for z-index)
+    // 1. Tiles (terrain base layer)
     this.tileRenderer = new TileRenderer();
     this.worldContainer.addChild(this.tileRenderer.container);
 
+    // 2. Roads layer (sits between terrain and buildings/vegetation)
+    this.worldContainer.addChild(this.tileRenderer.roadContainer);
+
+    // 3. Decorations layer (buildings, vegetation, fences - on top of roads)
+    this.worldContainer.addChild(this.tileRenderer.decorationContainer);
+
+    // 4. Fog overlay
     this.fogOverlay = new FogOfWarOverlay();
     this.worldContainer.addChild(this.fogOverlay.container);
+
+    this.pathOverlay = new PathOverlay();
+    this.worldContainer.addChild(this.pathOverlay.container);
 
     this.highlightOverlay = new HighlightOverlay();
     this.worldContainer.addChild(this.highlightOverlay.container);
@@ -66,12 +84,28 @@ export class Game {
     this.camera = new Camera(
       this.worldContainer,
       this.app.screen.width,
-      this.app.screen.height
+      this.app.screen.height,
     );
 
     // Set up HUD (added to stage, not world — stays fixed on screen)
     this.hud = new HUD(this.app.screen.width, this.app.screen.height);
     this.app.stage.addChild(this.hud.container);
+
+    // Set up mini-map (added to stage, not world — stays fixed on screen)
+    this.miniMap = new MiniMap(
+      this.worldMap,
+      this.app.screen.width,
+      this.app.screen.height,
+    );
+    this.app.stage.addChild(this.miniMap.container);
+
+    // Set up character sheet (added to stage, not world — modal overlay)
+    this.characterSheet = new CharacterSheet(
+      this.character,
+      this.app.screen.width,
+      this.app.screen.height,
+    );
+    this.app.stage.addChild(this.characterSheet.container);
 
     // Set up input
     this.input = new InputManager(this.app, this.camera);
@@ -79,18 +113,28 @@ export class Game {
 
   start(): void {
     console.log(
-      `[Unwritten] Game started — canvas ${this.app.screen.width}x${this.app.screen.height}`
+      `[Unwritten] Game started — canvas ${this.app.screen.width}x${this.app.screen.height}`,
     );
     console.log(
-      `[Unwritten] World: ${this.worldMap.width}x${this.worldMap.height} hexes`
+      `[Unwritten] World: ${this.worldMap.width}x${this.worldMap.height} hexes`,
     );
 
-    // Build tile graphics
+    // Build tile graphics (base terrain layer)
     this.tileRenderer.buildTiles(this.worldMap.grid);
 
-    // Draw vegetation on all tiles that have it
+    // Draw roads connecting settlements (BEFORE vegetation and buildings)
+    this.tileRenderer.drawRoadsFromSettlements(this.worldMap.grid, this.worldMap.settlements, this.worldMap);
+
+    // Draw vegetation, rocks, and buildings on tiles (these go on top of roads)
     this.worldMap.grid.forEach((hex) => {
       this.tileRenderer.drawVegetation(hex);
+      this.tileRenderer.drawRocks(hex);
+      this.tileRenderer.drawBuilding(hex, this.worldMap.grid);
+    });
+
+    // Draw settlement perimeters (walls/fences) after all buildings
+    this.worldMap.grid.forEach((hex) => {
+      this.tileRenderer.drawSettlementPerimeter(hex, this.worldMap.grid);
     });
 
     // Position character
@@ -103,7 +147,10 @@ export class Game {
 
     // Apply initial fog of war and highlights
     this.updateFogOfWar();
-    this.updateNeighborHighlights();
+    // this.updateNeighborHighlights(); // Removed: AP cost neighbor highlights
+
+    // Update mini-map with initial position
+    this.miniMap.updatePlayerPosition(this.character.currentTile);
 
     // Wire up input
     this.setupInput();
@@ -111,14 +158,17 @@ export class Game {
     // Wire up character callbacks
     this.character.onMove = () => {
       const pos = this.character.getWorldPosition();
-      this.characterRenderer.setPosition(pos.x, pos.y);
+      const isOnRoad = this.character.currentTile.hasRoad;
+      this.characterRenderer.setPosition(pos.x, pos.y, isOnRoad);
       this.camera.setTarget(pos.x, pos.y);
       this.updateFogOfWar();
-      this.updateNeighborHighlights();
+      // this.updateNeighborHighlights(); // Removed: AP cost neighbor highlights
+      this.miniMap.updatePlayerPosition(this.character.currentTile);
       // Clear selection on move
       this.selectedTile = null;
       this.hud.hideTooltip();
       this.highlightOverlay.clearHover();
+      this.pathOverlay.clearPath();
     };
 
     this.character.onAPChange = (ap) => {
@@ -128,12 +178,31 @@ export class Game {
     this.character.onNewTurn = (turn) => {
       this.hud.setTurn(turn);
       this.hud.setAP(this.character.ap);
-      this.updateNeighborHighlights();
+      // Don't clear movement queue - continue moving across turns
+      // Movement queue will only be cleared if player is attacked or clicks elsewhere
+      // this.updateNeighborHighlights(); // Removed: AP cost neighbor highlights
     };
 
     // HUD: End Turn button
     this.hud.onEndTurn = () => {
       this.character.endTurn();
+    };
+
+    // Mini-map: Click to move camera
+    this.miniMap.onClickLocation = (worldX, worldY) => {
+      this.camera.setTarget(worldX, worldY);
+      this.camera.snapToTarget();
+    };
+
+    // Character: Click to open character sheet
+    this.characterRenderer.onClick = () => {
+      this.characterSheet.show();
+      this.input.setEnabled(false); // Disable map input
+    };
+
+    // Character Sheet: Re-enable input when closed
+    this.characterSheet.onClose = () => {
+      this.input.setEnabled(true);
     };
 
     // Start game loop
@@ -143,10 +212,12 @@ export class Game {
     window.addEventListener("resize", () => {
       this.camera.resize(this.app.screen.width, this.app.screen.height);
       this.hud.resize(this.app.screen.width, this.app.screen.height);
+      this.miniMap.resize(this.app.screen.width, this.app.screen.height);
+      this.characterSheet.resize(this.app.screen.width, this.app.screen.height);
     });
 
     console.log(
-      `[Unwritten] Character placed at col=${this.character.currentTile.col}, row=${this.character.currentTile.row}`
+      `[Unwritten] Character placed at col=${this.character.currentTile.col}, row=${this.character.currentTile.row}`,
     );
   }
 
@@ -154,20 +225,24 @@ export class Game {
     const dt = ticker.deltaTime / 60; // normalize to seconds-like value
     this.camera.update(dt);
     this.characterRenderer.update(dt);
+    this.hud.update(dt);
+    
+    // Process movement queue
+    this.processMovementQueue();
   }
 
   private setupInput(): void {
-    // Left click (no drag): select tile for info
+    // Left click (no drag): command movement with pathfinding
     this.input.onSelect((worldX, worldY) => {
-      this.handleSelectClick(worldX, worldY);
-    });
-
-    // Right click: command movement
-    this.input.onMove((worldX, worldY) => {
       this.handleMoveClick(worldX, worldY);
     });
 
-    // Hover: show terrain tooltip
+    // Right click: select tile for info
+    this.input.onMove((worldX, worldY) => {
+      this.handleSelectClick(worldX, worldY);
+    });
+
+    // Hover: show path preview and terrain tooltip
     this.input.onHover((worldX, worldY, screenX, screenY) => {
       this.handleHover(worldX, worldY, screenX, screenY);
     });
@@ -180,6 +255,15 @@ export class Game {
       if (key === "c" || key === "C") {
         this.camera.centerOnTarget();
       }
+      if (key === "i" || key === "I") {
+        // Toggle character sheet
+        if (this.characterSheet.container.visible) {
+          this.characterSheet.hide();
+        } else {
+          this.characterSheet.show();
+          this.input.setEnabled(false);
+        }
+      }
     });
 
     // Mouse wheel zoom
@@ -190,6 +274,12 @@ export class Game {
 
   /** Currently selected tile (shown with info tooltip). */
   private selectedTile: HexTile | null = null;
+
+  /** Queue of tiles to move through (for pathfinding movement). */
+  private movementQueue: HexTile[] = [];
+
+  /** Is the character currently animating a move? */
+  private isMoving: boolean = false;
 
   private handleSelectClick(worldX: number, worldY: number): void {
     const hex = this.findHexAtPoint(worldX, worldY);
@@ -203,20 +293,54 @@ export class Game {
 
     this.selectedTile = hex;
     this.highlightOverlay.showHover(hex);
-
-    const isoCenter = hexIsoCenter(hex);
-    const screenX = isoCenter.x + this.worldContainer.x;
-    const screenY = isoCenter.y + this.worldContainer.y;
-    this.hud.showTooltip(hex.terrain, screenX, screenY);
+    
+    // Calculate movement cost if it's a neighbor
+    const movementCost = this.getMovementCostForTile(hex);
+    
+    // Get settlement information if tile belongs to a settlement
+    const settlement = this.worldMap.getSettlementForTile(hex);
+    
+    this.hud.showTooltip(
+      hex.terrain, 
+      hex.isRough, 
+      movementCost, 
+      this.character.ap, 
+      hex.building,
+      settlement,
+      hex.vegetation,
+      hex.treeDensity
+    );
   }
 
   private handleMoveClick(worldX: number, worldY: number): void {
     const clickedHex = this.findHexAtPoint(worldX, worldY);
-    if (!clickedHex) return;
-    const moved = this.character.tryMove(clickedHex, this.worldMap);
-    if (!moved) {
-      this.hud.setAP(this.character.ap);
+    if (!clickedHex || !clickedHex.explored) return;
+    
+    // Same tile as current destination - do nothing
+    if (clickedHex.col === this.character.currentTile.col && 
+        clickedHex.row === this.character.currentTile.row) {
+      return;
     }
+    
+    // Find path to clicked tile
+    const pathResult = findPath(
+      this.character.currentTile,
+      clickedHex,
+      this.worldMap,
+      true // Only use explored tiles
+    );
+    
+    if (!pathResult.found || pathResult.path.length === 0) {
+      console.log("No path found to target");
+      return;
+    }
+    
+    // Clear any existing movement and start new path
+    this.movementQueue = [];
+    this.isMoving = false;
+    
+    // Try to follow the path
+    this.followPath(pathResult.path);
   }
 
   /** Track last hovered tile to avoid redundant tooltip updates. */
@@ -226,12 +350,17 @@ export class Game {
     worldX: number,
     worldY: number,
     screenX: number,
-    screenY: number
+    screenY: number,
   ): void {
+    // Don't show path preview if character is moving
+    if (this.isMoving || this.movementQueue.length > 0) {
+      return;
+    }
+    
     const hex = this.findHexAtPoint(worldX, worldY);
     if (!hex) {
-      // If nothing selected, hide tooltip on empty hover
-      if (!this.selectedTile) this.hud.hideTooltip();
+      // Clear path on empty hover (tooltip only cleared when nothing is selected)
+      this.pathOverlay.clearPath();
       this.lastHoveredKey = "";
       return;
     }
@@ -240,14 +369,25 @@ export class Game {
     if (key === this.lastHoveredKey) return;
     this.lastHoveredKey = key;
 
-    // Show hover highlight (but don't override selection highlight)
-    if ((hex.explored || hex.visible) && hex !== this.selectedTile) {
-      this.highlightOverlay.showHover(hex);
-    }
+    // Don't show hover highlight, only show path preview
 
-    // Show tooltip on hover for explored tiles (unless a tile is selected)
-    if (!this.selectedTile && hex.explored) {
-      this.hud.showTooltip(hex.terrain, screenX, screenY);
+    // Show path preview if hovering over a different tile (no tooltip on hover)
+    if (hex !== this.character.currentTile && hex.explored) {
+      const pathResult = findPath(
+        this.character.currentTile,
+        hex,
+        this.worldMap,
+        true
+      );
+      
+      if (pathResult.found && pathResult.path.length > 0) {
+        const isValid = pathResult.totalCost <= this.character.ap;
+        this.pathOverlay.showPath(pathResult.path, this.character.currentTile, isValid);
+      } else {
+        this.pathOverlay.clearPath();
+      }
+    } else {
+      this.pathOverlay.clearPath();
     }
   }
 
@@ -259,7 +399,13 @@ export class Game {
 
     for (const n of neighbors) {
       if (!n.explored && !n.visible) continue; // Don't highlight hidden tiles
-      const cost = getAPCost(n.terrain);
+      const cost = getAPCost(
+        n.hasRoad,
+        n.isRough,
+        n.treeDensity,
+        this.character.currentTile.terrain,
+        n.terrain,
+      );
       if (cost <= this.character.ap) {
         reachable.push(n);
       } else {
@@ -278,13 +424,130 @@ export class Game {
     const flat = isoToFlat(isoX, isoY);
     return this.worldMap.grid.pointToHex(
       { x: flat.x, y: flat.y },
-      { allowOutside: false }
+      { allowOutside: false },
     );
+  }
+
+  /**
+   * Get the movement cost for a tile if it's a neighbor, null otherwise.
+   */
+  private getMovementCostForTile(tile: HexTile): number | null {
+    const neighbors = this.worldMap.getNeighbors(this.character.currentTile);
+    const isNeighbor = neighbors.some(
+      (n) => n.col === tile.col && n.row === tile.row
+    );
+    
+    if (!isNeighbor) return null;
+    
+    return getAPCost(
+      tile.hasRoad,
+      tile.isRough,
+      tile.treeDensity,
+      this.character.currentTile.terrain,
+      tile.terrain,
+    );
+  }
+
+  /**
+   * Follow a path, moving the character step by step until destination is reached.
+   * This queues the movement, which will be processed one tile at a time by the game loop.
+   * Movement continues across turns until the destination is reached or player is attacked.
+   */
+  private followPath(path: HexTile[]): void {
+    if (path.length === 0) return;
+
+    // Queue all tiles in the path
+    // The movement will continue across turns automatically
+    this.movementQueue = [...path];
+    
+    console.log(`Queued path of ${path.length} tiles`);
+  }
+
+  /**
+   * Process the movement queue, moving one tile at a time.
+   * Called every frame from the game loop.
+   * Continues across turns until destination is reached.
+   */
+  private processMovementQueue(): void {
+    // Don't start a new move if we're already moving
+    if (this.isMoving) {
+      // Check if the character has reached their target
+      if (this.isCharacterAtTarget()) {
+        this.isMoving = false;
+      } else {
+        return; // Still animating
+      }
+    }
+
+    // If no more tiles in queue, we're done
+    if (this.movementQueue.length === 0) return;
+
+    // Calculate AP cost for the next move (reuse this in tryMove to avoid duplication)
+    const nextTile = this.movementQueue[0];
+    const cost = getAPCost(
+      nextTile.hasRoad,
+      nextTile.isRough,
+      nextTile.treeDensity,
+      this.character.currentTile.terrain,
+      nextTile.terrain,
+    );
+
+    // If we don't have enough AP, end the turn automatically and continue
+    if (cost > this.character.ap) {
+      console.log(`Ending turn to continue journey (need ${cost} AP, have ${this.character.ap})`);
+      this.character.endTurn();
+      // After turn ends, we'll have fresh AP and can continue
+      return;
+    }
+
+    // Try to move, passing the pre-calculated cost to avoid redundant calculation
+    const moved = this.character.tryMove(nextTile, this.worldMap, cost);
+    if (moved) {
+      // Remove the tile from the queue
+      this.movementQueue.shift();
+      this.isMoving = true;
+      
+      // Log progress
+      if (this.movementQueue.length > 0) {
+        console.log(`Moving... ${this.movementQueue.length} tiles remaining`);
+      } else {
+        console.log("Destination reached!");
+      }
+    } else {
+      // Movement failed (should not happen with pathfinding), clear the queue
+      console.log("Failed to move along path - clearing queue");
+      this.movementQueue = [];
+    }
+  }
+
+  /**
+   * Stop the current movement (e.g., when player is attacked).
+   * This can be called from combat or other systems.
+   */
+  stopMovement(): void {
+    this.movementQueue = [];
+    this.isMoving = false;
+    console.log("Movement interrupted!");
+  }
+
+  /**
+   * Check if the character has reached their target position (animation complete).
+   */
+  private isCharacterAtTarget(): boolean {
+    const targetPos = this.character.getWorldPosition();
+    const renderPos = this.characterRenderer.container.position;
+    
+    const dx = targetPos.x - renderPos.x;
+    const dy = targetPos.y - renderPos.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    // Consider "reached" if within 2 pixels
+    return distance < 2;
   }
 
   /** Update fog of war based on character's vision radius. */
   private updateFogOfWar(): void {
-    const visionRadius = 8;
+    const visionRadius = 5.33;
     const charTile = this.character.currentTile;
 
     const visibleTiles = new Set<string>();
@@ -308,6 +571,11 @@ export class Game {
     });
 
     // Update the unified fog overlay
-    this.fogOverlay.update(visibleTiles, exploredTiles, [...this.worldMap.grid]);
+    this.fogOverlay.update(visibleTiles, exploredTiles, [
+      ...this.worldMap.grid,
+    ]);
+
+    // Update mini-map to reflect new explored areas
+    this.miniMap.update();
   }
 }

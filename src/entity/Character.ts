@@ -2,8 +2,9 @@ import { HexTile } from "../world/HexTile";
 import { getAPCost } from "../world/Terrain";
 import { WorldMap } from "../world/WorldMap";
 import { hexIsoCenter } from "../rendering/Isometric";
+import { Inventory } from "./Item";
 
-export const MAX_AP = 3;
+export const MAX_AP = 4;
 
 /**
  * The player character that moves on the hex grid using action points.
@@ -18,6 +19,9 @@ export class Character {
   /** Total turns elapsed. */
   turn: number = 1;
 
+  /** Character's inventory and equipment. */
+  readonly inventory: Inventory;
+
   /** Callback fired when a new turn starts. */
   onNewTurn?: (turn: number) => void;
 
@@ -29,21 +33,32 @@ export class Character {
 
   constructor(startTile: HexTile) {
     this.currentTile = startTile;
+    this.inventory = new Inventory();
   }
 
   /**
    * Attempt to move to an adjacent tile. Returns true if successful.
+   * @param target - The tile to move to
+   * @param worldMap - The world map
+   * @param precalculatedCost - Optional pre-calculated AP cost (avoids recalculation)
    */
-  tryMove(target: HexTile, worldMap: WorldMap): boolean {
+  tryMove(target: HexTile, worldMap: WorldMap, precalculatedCost?: number): boolean {
     // Must be a neighbor
     const neighbors = worldMap.getNeighbors(this.currentTile);
     const isNeighbor = neighbors.some(
-      (n) => n.col === target.col && n.row === target.row
+      (n) => n.col === target.col && n.row === target.row,
     );
     if (!isNeighbor) return false;
 
-    // Check AP cost
-    const cost = getAPCost(target.terrain);
+    // Use precalculated cost if provided, otherwise calculate it
+    // This avoids duplicate calculations when cost is already known
+    const cost = precalculatedCost ?? getAPCost(
+      target.hasRoad,
+      target.isRough,
+      target.treeDensity,
+      this.currentTile.terrain,
+      target.terrain,
+    );
     if (cost > this.ap) return false;
 
     // Move!
@@ -52,10 +67,8 @@ export class Character {
     this.onMove?.(target);
     this.onAPChange?.(this.ap);
 
-    // Auto-advance turn if AP exhausted
-    if (this.ap <= 0) {
-      this.endTurn();
-    }
+    // Don't auto-end turn - let the game handle turn advancement
+    // This allows multi-turn journeys to work properly
 
     return true;
   }
