@@ -17,12 +17,14 @@ The resource system adds natural resources to the map that can form the foundati
 - **Icon**: Deer antlers silhouette
 
 #### Fish
-- **Location**: Waters only (not shores)
-- **Terrain**: Deep Water, Shallow Water
-- **Spawn Chance**: 1.5%
-- **Use**: Fishing, food production
+- **Location**: Waters only (not shores) - especially shallow water near coasts
+- **Terrain**: Deep Water (sparse), Shallow Water (abundant)
+- **Spawn Chance**: 2.5% (boosted to encourage coastal settlements)
+- **Use**: Fishing, food production (drives fishing village formation)
 - **Renewable**: Yes
 - **Icon**: Fish shape with tail
+- **Settlement Impact**: HIGH - Fish availability drives coastal settlement placement
+- **Extraction**: Fishing Hut or Dock (placed on shore adjacent to fish)
 
 #### Timber
 - **Location**: Forests with moderate to high tree density

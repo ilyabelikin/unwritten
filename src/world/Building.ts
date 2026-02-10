@@ -10,7 +10,8 @@ export enum BuildingType {
   Field = "field",
   // Resource extraction - Food
   HuntingLodge = "hunting_lodge",
-  FishingHut = "fishing_hut",
+  FishingHut = "fishing_hut", // Coastal housing (not extraction)
+  FishingBoat = "fishing_boat", // Placed ON fish in water to extract fish
   Pasture = "pasture",
   // Resource extraction - Materials
   LumberCamp = "lumber_camp",
@@ -24,6 +25,15 @@ export enum BuildingType {
   SilverMine = "silver_mine",
   GoldMine = "gold_mine",
   GemMine = "gem_mine",
+  // Production buildings - Food
+  Bakery = "bakery",
+  Butcher = "butcher",
+  // Production buildings - Materials
+  Smelter = "smelter",
+  Smithy = "smithy",
+  CharcoalBurner = "charcoal_burner",
+  Kiln = "kiln",
+  Tannery = "tannery",
   // Other specialized structures
   Dock = "dock",
   Monastery = "monastery",
@@ -107,9 +117,17 @@ export const BUILDING_CONFIG: Record<BuildingType, BuildingConfig> = {
     name: "Fishing Hut",
     isLandmark: false,
     size: "small",
-    baseColor: 0xd4a574, // Light wood
+    baseColor: 0xd4a574, // Light wood (coastal housing)
     accentColor: 0x8b7355, // Weathered wood
     roofColor: 0x708090, // Slate gray
+  },
+  [BuildingType.FishingBoat]: {
+    name: "Fishing Boat",
+    isLandmark: false,
+    size: "small",
+    baseColor: 0x8b7355, // Wood brown
+    accentColor: 0xf5deb3, // Wheat (sail/canvas)
+    roofColor: 0x4a4a4a, // Dark gray (mast)
   },
   [BuildingType.Pasture]: {
     name: "Pasture",
@@ -210,11 +228,69 @@ export const BUILDING_CONFIG: Record<BuildingType, BuildingConfig> = {
     accentColor: 0x2f4f4f, // Dark slate gray
     roofColor: 0x696969,
   },
+  // === PRODUCTION BUILDINGS - FOOD ===
+  [BuildingType.Bakery]: {
+    name: "Bakery",
+    isLandmark: false,
+    size: "medium",
+    baseColor: 0xd2691e, // Chocolate
+    accentColor: 0xdeb887, // Burlywood (wheat color)
+    roofColor: 0x8b4513, // Saddle brown
+  },
+  [BuildingType.Butcher]: {
+    name: "Butcher",
+    isLandmark: false,
+    size: "small",
+    baseColor: 0xdc143c, // Crimson
+    accentColor: 0x8b0000, // Dark red
+    roofColor: 0x8b4513, // Saddle brown
+  },
+  // === PRODUCTION BUILDINGS - MATERIALS ===
+  [BuildingType.Smelter]: {
+    name: "Smelter",
+    isLandmark: false,
+    size: "medium",
+    baseColor: 0x8b4513, // Saddle brown
+    accentColor: 0xff4500, // Orange-red (for fire)
+    roofColor: 0x2f4f4f, // Dark slate gray
+  },
+  [BuildingType.Smithy]: {
+    name: "Smithy",
+    isLandmark: false,
+    size: "medium",
+    baseColor: 0x696969, // Dim gray
+    accentColor: 0xff6347, // Tomato (for forge fire)
+    roofColor: 0x2f4f4f, // Dark slate gray
+  },
+  [BuildingType.CharcoalBurner]: {
+    name: "Charcoal Burner",
+    isLandmark: false,
+    size: "small",
+    baseColor: 0x654321, // Dark brown
+    accentColor: 0x2c2c2c, // Very dark gray (charcoal)
+    roofColor: 0x4a4a4a, // Dark gray
+  },
+  [BuildingType.Kiln]: {
+    name: "Kiln",
+    isLandmark: false,
+    size: "medium",
+    baseColor: 0xb22222, // Brick red
+    accentColor: 0xff8c00, // Dark orange (fire)
+    roofColor: 0x8b4513, // Saddle brown
+  },
+  [BuildingType.Tannery]: {
+    name: "Tannery",
+    isLandmark: false,
+    size: "small",
+    baseColor: 0x8b7355, // Burlywood
+    accentColor: 0xa0522d, // Sienna
+    roofColor: 0x654321, // Dark brown
+  },
   [BuildingType.Dock]: {
     name: "Dock",
     isLandmark: false,
     size: "small",
-    baseColor: 0x8b7355, // Brown wood
+    baseColor: 0x8b7355, // Brown wood (shipbuilding facility)
     accentColor: 0x654321, // Darker wood
     roofColor: 0x654321,
   },
@@ -342,6 +418,8 @@ export enum VillageSpecialization {
  * Represents a settlement (village or city).
  */
 export interface Settlement {
+  /** Unique name for the settlement */
+  name: string;
   /** Type: 'village', 'city', or 'hamlet' */
   type: "village" | "city" | "hamlet";
   /** Village specialization (only for villages and hamlets) */
@@ -352,4 +430,49 @@ export interface Settlement {
   tiles: Array<{ col: number; row: number }>;
   /** The landmark building type (for cities or specialized villages) */
   landmark?: BuildingType;
+}
+
+/**
+ * Base housing capacity per density level (people per tile)
+ * Housing tiles can have density levels 1-5, supporting this many people each.
+ * A single house should hold a family, not just 1 person!
+ */
+export const HOUSING_DENSITY_CAPACITY = [0, 6, 12, 18, 24, 30]; // Index = density level
+
+/**
+ * Which building types provide housing (and can use density system)
+ */
+export const HOUSING_BUILDINGS: Set<BuildingType> = new Set([
+  BuildingType.House,
+  BuildingType.CityHouse,
+  BuildingType.FishingHut,
+]);
+
+/**
+ * Check if a building type provides housing
+ */
+export function isHousingBuilding(building: BuildingType): boolean {
+  return HOUSING_BUILDINGS.has(building);
+}
+
+/**
+ * Calculate housing capacity for a settlement using density system
+ */
+export function calculateHousingCapacity(
+  tiles: Array<{ col: number; row: number }>,
+  getTile: (col: number, row: number) => { building: BuildingType; housingDensity: number } | undefined
+): number {
+  let capacity = 0;
+  
+  for (const tile of tiles) {
+    const tileData = getTile(tile.col, tile.row);
+    if (tileData && isHousingBuilding(tileData.building)) {
+      // Each housing tile supports HOUSING_DENSITY_CAPACITY[density] people
+      // Density 1 = 6 people (small family), up to Density 5 = 30 people (tenement)
+      const density = Math.max(1, Math.min(5, tileData.housingDensity));
+      capacity += HOUSING_DENSITY_CAPACITY[density];
+    }
+  }
+  
+  return capacity;
 }

@@ -15,6 +15,7 @@ export class HUD {
   private apContainer: Container;
   private apDiamonds: Graphics[] = [];
   private turnText: Text;
+  private embarkedText: Text;
   private tooltipContainer: Container;
   private tooltipBg: Graphics;
   private tooltipText: Text;
@@ -65,6 +66,15 @@ export class HUD {
     });
     this.turnText.position.set(20, 50);
     this.container.addChild(this.turnText);
+
+    // -- Embarked Status --
+    this.embarkedText = new Text({
+      text: "",
+      style: this.labelStyle(),
+    });
+    this.embarkedText.position.set(20, 75);
+    this.embarkedText.visible = false;
+    this.container.addChild(this.embarkedText);
 
     // -- Terrain Tooltip --
     this.tooltipContainer = new Container({ label: "tooltip" });
@@ -140,6 +150,16 @@ export class HUD {
     this.turnText.text = `Turn ${turn}`;
   }
 
+  /** Update embarked status display. */
+  setEmbarked(embarked: boolean): void {
+    if (embarked) {
+      this.embarkedText.text = "⛵ Embarked";
+      this.embarkedText.visible = true;
+    } else {
+      this.embarkedText.visible = false;
+    }
+  }
+
   /** Show terrain tooltip in a fixed position under the minimap. */
   showTooltip(
     terrain: TerrainType,
@@ -151,6 +171,30 @@ export class HUD {
     vegetation?: VegetationType,
     treeDensity?: number,
     resource?: ResourceDeposit,
+    economyData?: { resources: Array<{ name: string; amount: number }>; goods: Array<{ name: string; amount: number }> },
+    populationData?: {
+      totalPopulation: number;
+      workingPopulation: number;
+      housing: number;
+      housingTiles?: number;
+      avgDensity?: number;
+      avgHealth: number;
+      avgHunger: number;
+      jobCounts: Array<{ job: string; count: number }>;
+    },
+    tradeData?: {
+      activeTraders: number;
+      buyOffers: Array<{ material: string; quantity: number; price: number }>;
+      sellOffers: Array<{ material: string; quantity: number; price: number }>;
+    },
+    tradersAtTile?: Array<{
+      name: string;
+      home: string;
+      state: string;
+      destination: string;
+      cargo: string;
+      money: number;
+    }>,
   ): void {
     const config = TERRAIN_CONFIG[terrain];
     const roughSuffix = isRough ? " (Rough)" : "";
@@ -224,6 +268,97 @@ export class HUD {
         resource.quality >= 0.4 ? "Fair" :
         "Poor";
       text += `\n⬥ ${resourceConfig.name} (${qualityDesc})`;
+    }
+
+    // Add population information for settlements
+    if (populationData) {
+      text += `\n\n--- Population ---`;
+      text += `\n• Total: ${populationData.totalPopulation} people`;
+      text += `\n• Workers: ${populationData.workingPopulation}`;
+      text += `\n• Housing: ${populationData.totalPopulation} / ${populationData.housing}`;
+      
+      // Show housing density info
+      if (populationData.housingTiles && populationData.avgDensity) {
+        text += `\n  (${populationData.housingTiles} tiles, avg density ${populationData.avgDensity})`;
+      }
+      
+      text += `\n• Health: ${populationData.avgHealth}%`;
+      text += `\n• Hunger: ${populationData.avgHunger}%`;
+      
+      // Show top job types (limit to 4)
+      if (populationData.jobCounts.length > 0) {
+        text += `\n\n--- Workers ---`;
+        const topJobs = populationData.jobCounts.slice(0, 4);
+        for (const job of topJobs) {
+          text += `\n• ${job.count} ${job.job}`;
+        }
+      }
+    }
+
+    // Add trader information
+    if (tradersAtTile && tradersAtTile.length > 0) {
+      text += `\n\n--- Traders on Tile ---`;
+      for (const trader of tradersAtTile) {
+        text += `\n\n${trader.name}`;
+        text += `\n• Home: ${trader.home}`;
+        text += `\n• Status: ${trader.state}`;
+        if (trader.destination !== "Unknown") {
+          text += `\n• Going to: ${trader.destination}`;
+        }
+        if (trader.cargo !== "Empty") {
+          text += `\n• Carrying: ${trader.cargo}`;
+        }
+        text += `\n• Coins: ${trader.money}g`;
+      }
+    }
+
+    // Add trade information for settlements
+    if (tradeData && tradeData.activeTraders > 0) {
+      text += `\n\n--- Trade ---`;
+      text += `\n• Active Traders: ${tradeData.activeTraders}`;
+      
+      // Show buy offers (top 2)
+      if (tradeData.buyOffers.length > 0) {
+        const topBuys = tradeData.buyOffers.slice(0, 2);
+        for (const offer of topBuys) {
+          text += `\n• Buying: ${offer.material} x${offer.quantity}`;
+        }
+      }
+      
+      // Show sell offers (top 2)
+      if (tradeData.sellOffers.length > 0) {
+        const topSells = tradeData.sellOffers.slice(0, 2);
+        for (const offer of topSells) {
+          text += `\n• Selling: ${offer.material} x${offer.quantity}`;
+        }
+      }
+    }
+
+    // Add economy information for settlements
+    if (economyData) {
+      // Show top resources (limit to 3 for space)
+      if (economyData.resources.length > 0) {
+        text += `\n\n--- Stockpile ---`;
+        const topResources = economyData.resources.slice(0, 3);
+        for (const res of topResources) {
+          text += `\n• ${res.name}: ${res.amount}`;
+        }
+        if (economyData.resources.length > 3) {
+          text += `\n  ... and ${economyData.resources.length - 3} more`;
+        }
+      }
+      
+      // Show top goods (limit to 3 for space)
+      if (economyData.goods.length > 0) {
+        text += `\n\n--- Goods ---`;
+        const topGoods = economyData.goods.slice(0, 3);
+        for (const good of topGoods) {
+          text += `\n• ${good.name}: ${good.amount}`;
+        }
+        if (economyData.goods.length > 3) {
+          text += `\n  ... and ${economyData.goods.length - 3} more`;
+        }
+      }
     }
 
     this.tooltipText.text = text;

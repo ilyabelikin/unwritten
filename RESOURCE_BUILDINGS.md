@@ -17,12 +17,26 @@ This document describes all buildings designed to extract and process natural re
 - **Purpose**: Provides meat through hunting
 
 #### Fishing Hut
-- **Extracts**: Fish
+- **Extracts**: Fish (support building)
 - **Location**: Adjacent to water (shores, shallow water)
 - **Size**: Small
 - **Description**: Small weathered hut where fishermen store their gear and prepare their catch
 - **Visual**: Light wood construction with thatched roof, fishing rod and nets outside
-- **Purpose**: Provides fish through fishing
+- **Purpose**: Provides storage and processing for fishing operations
+- **Note**: Always paired with Fishing Boat ON the fish resource
+
+#### Fishing Boat
+- **Extracts**: Fish (primary exploitation)
+- **Location**: ON fish resource (in water)
+- **Size**: Small
+- **Description**: Small wooden fishing boat placed directly ON fish resources in water
+- **Visual**: Brown wooden hull (elongated ellipse), wheat-colored sail, dark mast, **fishing net deployed in water on side**, rope connecting net to boat, additional net in boat, oar
+- **Purpose**: Visual indicator of active fish exploitation - placed ON fish like mines on ore
+- **Mechanics**: 
+  - Automatically placed when Fishing Hut exploits fish
+  - Boat ON fish (water) + Hut adjacent (shore)
+  - Fish icon hidden when boat placed
+  - Shows exploitation clearly
 
 #### Pasture
 - **Extracts**: Livestock
@@ -149,7 +163,7 @@ All mine types share a common structure:
 | Resource | Primary Building | Alternative |
 |----------|-----------------|-------------|
 | Wild Game | Hunting Lodge | - |
-| Fish | Fishing Hut | Dock |
+| Fish | Fishing Boat (water) + Fishing Hut (shore) | Dock |
 | Livestock | Pasture | - |
 | Timber | Lumber Camp | Sawmill (processing) |
 | Clay | Clay Pit | - |
@@ -172,7 +186,8 @@ Buildings should be placed:
 
 ### Terrain Requirements
 - **Hunting Lodge**: Forest edges or clearings
-- **Fishing Hut**: Shore or shallow water edges
+- **Fishing Hut**: Shore or shallow water edges (adjacent to fish)
+- **Fishing Boat**: Water tiles (directly ON fish resource)
 - **Pasture**: Open plains or gentle hills
 - **Lumber Camp**: Forest clearings
 - **Sawmill**: Near water (for water wheel)
@@ -200,7 +215,7 @@ Buildings should be placed:
 
 #### Food Supply
 1. **Hunting Lodge** → Meat
-2. **Fishing Hut** → Fish
+2. **Fishing Boat** (water) + **Fishing Hut** (shore) → Fish
 3. **Pasture** → Meat/Wool/Leather
 4. **Salt Works** → Salt → Food Preservation
 

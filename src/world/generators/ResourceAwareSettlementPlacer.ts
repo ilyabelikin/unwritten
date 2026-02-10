@@ -91,6 +91,11 @@ export class ResourceAwareSettlementPlacer extends SettlementPlacer {
 
       // Calculate location score
       let score = analysis.score;
+      
+      // Bonus for coastal locations (shore tiles) - enables fishing villages
+      if (hex.terrain === TerrainType.Shore) {
+        score += 1.5; // Coastal bonus
+      }
 
       // Bonus for preferred resources
       if (preferredResources && preferredResources.length > 0) {
@@ -118,11 +123,28 @@ export class ResourceAwareSettlementPlacer extends SettlementPlacer {
         bestScore = score;
         bestLocation = { tile: hex, analysis };
       }
+      
+      // For cities/villages: Accept first "good enough" location with resources
+      // This ensures we don't keep searching forever for perfect spots
+      if (type !== "hamlet" && analysis.totalResources > 0 && score > 2) {
+        return { tile: hex, analysis };
+      }
     }
 
-    // Accept best location found (even if score is 0 - not all settlements need resources)
-    // The scoring system will still prefer resource-rich locations when available
-    return bestLocation;
+    // Return best location if it has resources
+    // Cities and villages REQUIRE resources (even low quality)
+    // Hamlets can be placed without resources
+    if (type === "city" || type === "village") {
+      // Only return if we found resources
+      if (bestLocation && bestLocation.analysis.totalResources > 0) {
+        return bestLocation;
+      }
+      // No resources found - skip this settlement
+      return null;
+    } else {
+      // Hamlets prefer resources but can be placed without them
+      return bestLocation;
+    }
   }
 
   /**
@@ -239,8 +261,11 @@ export class ResourceAwareSettlementPlacer extends SettlementPlacer {
       case ResourceType.Salt:
         return 2.0;
 
-      // Medium-low value: Food sources
+      // Medium value: Fish (important food source, drives coastal settlements)
       case ResourceType.Fish:
+        return 2.0;
+
+      // Medium-low value: Other food sources
       case ResourceType.WildGame:
       case ResourceType.Livestock:
         return 1.5;
@@ -272,7 +297,9 @@ export class ResourceAwareSettlementPlacer extends SettlementPlacer {
       return resourceTile;
     }
 
-    // FALLBACK: If resource tile is unsuitable (e.g., water for fish), place adjacent
+    // FALLBACK: If resource tile is unsuitable (e.g., water for fish), place IMMEDIATELY adjacent
+    // IMPORTANT: Extraction only works from the building tile + immediate neighbors!
+    // Don't place buildings 2+ tiles away - they won't be able to extract anything.
     const neighbors = this.getNeighborsInRange(grid, resourceTile, 1);
     
     for (const neighbor of neighbors) {
@@ -286,19 +313,7 @@ export class ResourceAwareSettlementPlacer extends SettlementPlacer {
       }
     }
 
-    // Last resort: Try one more ring out
-    const extendedNeighbors = this.getNeighborsInRange(grid, resourceTile, 2);
-    for (const neighbor of extendedNeighbors) {
-      if (
-        this.isSuitableForExtractionBuilding(neighbor) &&
-        neighbor.building === BuildingType.None &&
-        neighbor.settlementId === undefined
-      ) {
-        return neighbor;
-      }
-    }
-
-    return null;
+    return null; // Could not find suitable location within extraction range
   }
 
   /**

@@ -32,6 +32,9 @@ export class HexTile extends defineHex({
   /** Building on this tile (if any) */
   building: BuildingType = BuildingType.None;
 
+  /** Housing density level (1-5 people per housing tile) */
+  housingDensity: number = 1;
+
   /** Settlement ID this tile belongs to (if any) */
   settlementId?: number;
 

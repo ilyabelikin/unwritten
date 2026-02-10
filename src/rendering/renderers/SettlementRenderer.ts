@@ -171,6 +171,11 @@ export class SettlementRenderer {
       return;
     }
 
+    // Don't draw fences around water-based buildings (fishing boats are IN water)
+    if (hex.building === BuildingType.FishingBoat) {
+      return;
+    }
+
     const tilesArray = Array.from(allTiles);
     const neighbors = this.getSettlementNeighbors(hex, tilesArray);
     

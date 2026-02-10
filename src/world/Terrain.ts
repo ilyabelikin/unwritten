@@ -1,4 +1,6 @@
 import { Palette } from "../rendering/Palette";
+import { BuildingType } from "./Building";
+import { HexTile } from "./HexTile";
 
 /** Terrain types ordered roughly by elevation */
 export enum TerrainType {
@@ -80,6 +82,7 @@ export const TERRAIN_CONFIG: Record<TerrainType, TerrainConfig> = {
  * Calculate the AP cost to move to a tile.
  * Roads = 1 AP, Normal terrain = 2 AP, Rough terrain = 3 AP, Dense forest = +1 AP
  * Embarking on water or disembarking from water = +2 AP
+ * When embarked, water movement = 1 AP (like roads)
  */
 export function getAPCost(
   hasRoad: boolean,
@@ -87,7 +90,13 @@ export function getAPCost(
   treeDensity: number = 0,
   fromTerrain?: TerrainType,
   toTerrain?: TerrainType,
+  isEmbarked: boolean = false,
 ): number {
+  // Special case: embarked water movement costs 1 AP (like roads)
+  if (isEmbarked && toTerrain && isWater(toTerrain)) {
+    return 1;
+  }
+
   // Base cost depends on terrain type
   let cost = hasRoad ? 1 : isRoughTerrain ? 3 : 2;
 
@@ -134,4 +143,9 @@ export function isWater(terrain: TerrainType): boolean {
 /** Can vegetation grow on this terrain? */
 export function supportsVegetation(terrain: TerrainType): boolean {
   return terrain === TerrainType.Plains || terrain === TerrainType.Hills;
+}
+
+/** Is this tile a pier or dock (where characters can embark/disembark)? */
+export function isPierOrDock(tile: HexTile): boolean {
+  return tile.building === BuildingType.Pier || tile.building === BuildingType.Dock;
 }

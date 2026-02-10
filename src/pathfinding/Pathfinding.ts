@@ -1,5 +1,5 @@
 import { HexTile } from "../world/HexTile";
-import { getAPCost } from "../world/Terrain";
+import { getAPCost, isWater, isPierOrDock } from "../world/Terrain";
 
 /**
  * A* pathfinding for hex grids.
@@ -29,12 +29,14 @@ export interface PathResult {
 /**
  * Find the optimal path from start to goal using A*.
  * Returns the path as an array of tiles (excluding the start tile).
+ * Respects water movement restrictions based on embarked state.
  */
 export function findPath(
   start: HexTile,
   goal: HexTile,
   map: IPathfindingMap,
   onlyExplored: boolean = true,
+  isEmbarked: boolean = false,
 ): PathResult {
   // Early exit if start and goal are the same
   if (start.col === goal.col && start.row === goal.row) {
@@ -98,6 +100,43 @@ export function findPath(
       // Skip if not explored (unless we allow unexplored)
       if (onlyExplored && !neighbor.explored) continue;
 
+      // Water movement validation
+      const currentIsWater = isWater(current.tile.terrain);
+      const neighborIsWater = isWater(neighbor.terrain);
+      const currentIsPierOrDock = isPierOrDock(current.tile);
+      const neighborIsPierOrDock = isPierOrDock(neighbor);
+      
+      // Track if we would be embarked when reaching this neighbor
+      let embarkedAtNeighbor = isEmbarked;
+      
+      // If moving to water from land
+      if (!currentIsWater && neighborIsWater) {
+        // Exception: piers/docks are always accessible from land
+        if (!neighborIsPierOrDock && !currentIsPierOrDock && !isEmbarked) {
+          // Can't move to water unless:
+          // 1. Neighbor is a pier/dock (always accessible), OR
+          // 2. Currently on pier/dock (can embark), OR
+          // 3. Already embarked
+          continue;
+        }
+        // Will be embarked after this move (unless going to a pier/dock)
+        if (!neighborIsPierOrDock) {
+          embarkedAtNeighbor = true;
+        }
+      }
+      
+      // If moving from water to land
+      if (currentIsWater && !neighborIsWater) {
+        if (!neighborIsPierOrDock && embarkedAtNeighbor) {
+          // Can't disembark on regular land
+          continue;
+        }
+        // Will be disembarked after this move (if landing on pier/dock)
+        if (neighborIsPierOrDock) {
+          embarkedAtNeighbor = false;
+        }
+      }
+
       // Calculate movement cost to this neighbor (including water transition costs)
       const moveCost = getAPCost(
         neighbor.hasRoad,
@@ -105,6 +144,7 @@ export function findPath(
         neighbor.treeDensity,
         current.tile.terrain,
         neighbor.terrain,
+        embarkedAtNeighbor && neighborIsWater, // Use embarked state for water movement
       );
       const tentativeG = current.gCost + moveCost;
 
@@ -150,20 +190,44 @@ function reconstructPath(goalNode: PathNode): PathResult {
 
 /**
  * Check if a path is valid (all tiles explored and within AP budget).
+ * Respects water movement restrictions based on embarked state.
  */
 export function isPathValid(
   path: HexTile[],
   startTile: HexTile,
   availableAP: number,
   map: IPathfindingMap,
+  isEmbarked: boolean = false,
 ): boolean {
   if (path.length === 0) return true;
 
   let currentTile = startTile;
   let apCost = 0;
+  let embarked = isEmbarked;
 
   for (const tile of path) {
     if (!tile.explored) return false;
+
+    // Water movement validation
+    const currentIsWater = isWater(currentTile.terrain);
+    const tileIsWater = isWater(tile.terrain);
+    const tileIsPierOrDock = isPierOrDock(tile);
+    
+    // Check if we can make this move
+    // Exception: piers/docks are always accessible from land
+    if (!currentIsWater && tileIsWater && !tileIsPierOrDock && !isPierOrDock(currentTile) && !embarked) {
+      return false; // Can't move to water without pier/dock
+    }
+    if (currentIsWater && !tileIsWater && !tileIsPierOrDock && embarked) {
+      return false; // Can't disembark on regular land
+    }
+    
+    // Update embarked state
+    if (!currentIsWater && tileIsWater && !tileIsPierOrDock && isPierOrDock(currentTile)) {
+      embarked = true;
+    } else if (currentIsWater && !tileIsWater && tileIsPierOrDock) {
+      embarked = false;
+    }
 
     const cost = getAPCost(
       tile.hasRoad,
@@ -171,6 +235,7 @@ export function isPathValid(
       tile.treeDensity,
       currentTile.terrain,
       tile.terrain,
+      embarked && tileIsWater,
     );
     apCost += cost;
 

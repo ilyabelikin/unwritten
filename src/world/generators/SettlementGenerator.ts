@@ -6,6 +6,8 @@ import { WorldGenConfig } from "../WorldGenerator";
 import { ResourceAwareSettlementPlacer, ResourceAnalysis } from "./ResourceAwareSettlementPlacer";
 import { ResourceType } from "../Resource";
 import { getPrimaryExtractionBuilding } from "../ResourceExtraction";
+import { getHexNeighbors } from "../HexMapUtils";
+import { SettlementNameGenerator } from "./SettlementNameGenerator";
 
 /**
  * Handles settlement generation (cities and villages)
@@ -16,6 +18,7 @@ export class SettlementGenerator {
   private settlements: Settlement[] = [];
   private seededRandom: (seed: number) => number;
   private hexDistance: (a: HexTile, b: HexTile) => number;
+  private nameGenerator: SettlementNameGenerator;
 
   constructor(
     config: WorldGenConfig,
@@ -26,6 +29,14 @@ export class SettlementGenerator {
     this.seededRandom = seededRandom;
     this.hexDistance = hexDistance;
     this.placer = new ResourceAwareSettlementPlacer();
+    this.nameGenerator = new SettlementNameGenerator();
+  }
+  
+  /**
+   * Get the name generator (for use by other generators)
+   */
+  getNameGenerator(): SettlementNameGenerator {
+    return this.nameGenerator;
   }
 
   /**
@@ -149,6 +160,13 @@ export class SettlementGenerator {
     let placedTiles = extractionTiles.length;
     tiles.push(...extractionTiles);
 
+    // Check if this is a coastal city and add a dock/pier
+    const dockTile = this.tryPlaceCoastalDock(grid, centerTile, settlementId);
+    if (dockTile) {
+      tiles.push(dockTile);
+      placedTiles++;
+    }
+
     // THEN: Place city houses and other buildings around the landmark
     for (const neighbor of neighbors) {
       if (placedTiles >= numTiles) break;
@@ -168,16 +186,40 @@ export class SettlementGenerator {
           settlementId * 5.1 + neighbor.col * 0.3 + neighbor.row * 0.7,
         ) < chance
       ) {
-        // Mix of city houses (80%), warehouses (15%), and trading posts (5%)
+        // City building distribution:
+        // - 1 Trading Post (employs 2 merchants, adds commerce visual)
+        // - Multiple production buildings (Windmill, Bakery, Warehouse)
+        // - Majority city houses
         const buildingRoll = this.seededRandom(settlementId * 7.9 + neighbor.col + neighbor.row);
         let building: BuildingType;
         
-        if (buildingRoll < 0.8) {
-          building = BuildingType.CityHouse;
-        } else if (buildingRoll < 0.95) {
-          building = BuildingType.Warehouse;
-        } else {
+        // First special building is always a trading post (for visual variety and merchant jobs)
+        const hasTradeBuilding = tiles.some(t => {
+          const tile = grid.getHex(t);
+          return tile && tile.building === BuildingType.TradingPost;
+        });
+        
+        if (!hasTradeBuilding && buildingRoll >= 0.85) {
+          // Place the single trading post (optional - traders spawn from settlement center)
           building = BuildingType.TradingPost;
+        } else if (buildingRoll < 0.70) {
+          // 70% city houses
+          building = BuildingType.CityHouse;
+        } else if (buildingRoll < 0.80) {
+          // 10% warehouses
+          building = BuildingType.Warehouse;
+        } else if (buildingRoll < 0.85) {
+          // 5% windmills (grain processing)
+          building = BuildingType.Windmill;
+        } else if (buildingRoll < 0.90) {
+          // 5% bakeries (bread production)
+          building = BuildingType.Bakery;
+        } else if (buildingRoll < 0.95) {
+          // 5% grain silos (storage)
+          building = BuildingType.GrainSilo;
+        } else {
+          // 5% butchers (meat production)
+          building = BuildingType.Butcher;
         }
 
         neighbor.building = building;
@@ -190,6 +232,7 @@ export class SettlementGenerator {
     }
 
     return {
+      name: this.nameGenerator.generateName("city"),
       type: "city",
       center: { col: centerTile.col, row: centerTile.row },
       tiles,
@@ -319,7 +362,14 @@ export class SettlementGenerator {
       placedTiles++;
     }
 
+    // Add dock if this is a coastal village
+    const dockTile = this.tryPlaceCoastalDock(grid, centerTile, settlementId);
+    if (dockTile) {
+      tiles.push(dockTile);
+    }
+
     return {
+      name: this.nameGenerator.generateName("village", specialization),
       type: "village",
       specialization,
       center: { col: centerTile.col, row: centerTile.row },
@@ -390,6 +440,8 @@ export class SettlementGenerator {
 
   /**
    * Determine village specialization based on nearby terrain (ORIGINAL - terrain-based fallback)
+   * NOTE: This is ONLY used when no dominant resources are found nearby.
+   * It checks for ACTUAL resources (not just terrain) to avoid placing fishing huts without fish!
    */
   private determineVillageSpecialization(
     grid: Grid<HexTile>,
@@ -399,10 +451,11 @@ export class SettlementGenerator {
     // Check nearby terrain within 2-3 tiles
     const nearbyTiles = this.placer.getNeighborsInRange(grid, centerTile, 3);
 
-    // Count terrain types
+    // Count terrain types AND check for actual resources
     let waterCount = 0;
     let mountainCount = 0;
     let forestCount = 0;
+    let hasFish = false;
 
     for (const tile of nearbyTiles) {
       if (isWater(tile.terrain) || tile.terrain === TerrainType.Shore) {
@@ -414,13 +467,17 @@ export class SettlementGenerator {
       if (tile.vegetation === VegetationType.Tree) {
         forestCount++;
       }
+      // Check for actual fish resources
+      if (tile.resource && tile.resource.type === ResourceType.Fish) {
+        hasFish = true;
+      }
     }
 
     // Determine specialization based on terrain
     const roll = this.seededRandom(settlementId * 5.7);
 
-    // Fishing villages near water (30% if near coast)
-    if (waterCount > 3 && roll < 0.5) {
+    // Fishing villages ONLY if there are actual fish resources nearby
+    if (waterCount > 3 && hasFish && roll < 0.5) {
       return VillageSpecialization.Fishing;
     }
 
@@ -502,7 +559,7 @@ export class SettlementGenerator {
         return {
           landmark: BuildingType.Windmill,
           primaryBuilding: BuildingType.Field,
-          secondaryBuilding: BuildingType.GrainSilo,
+          secondaryBuilding: BuildingType.Bakery,
         };
       case VillageSpecialization.Military:
         return {
@@ -578,6 +635,17 @@ export class SettlementGenerator {
           buildingTile.settlementId = settlementId;
           placedTiles.push({ col: buildingTile.col, row: buildingTile.row });
           placed++;
+
+          // Special case: For fish, ALSO place a fishing boat ON the fish itself (in water)
+          if (resourceType === ResourceType.Fish) {
+            // Place boat ON the fish tile (in water) to show exploitation visually
+            // IMPORTANT: Only place boat if tile is actually in water!
+            if (resourceTile.building === BuildingType.None && isWater(resourceTile.terrain)) {
+              resourceTile.building = BuildingType.FishingBoat;
+              resourceTile.settlementId = settlementId;
+              placedTiles.push({ col: resourceTile.col, row: resourceTile.row });
+            }
+          }
         }
       }
     }
@@ -616,9 +684,9 @@ export class SettlementGenerator {
       resourceAnalysis.dominantResource
     );
 
-    // Decide hamlet composition based on resources:
-    // If there's a good resource nearby (score > 2), prioritize extraction
-    // Otherwise, just a house or mixed
+    // Decide hamlet composition
+    // CRITICAL: Every hamlet MUST have at least one house (for people to live)
+    // Hamlets can have 1-2 buildings total
     const compositionRoll = this.seededRandom(settlementId * 11.7);
     const hasGoodResource = resourceAnalysis.score > 2;
     
@@ -626,28 +694,22 @@ export class SettlementGenerator {
     let hasSecondBuilding = false;
     
     if (hasGoodResource) {
-      // Resource-focused hamlet
-      if (compositionRoll < 0.6) {
-        // 60% - just an extraction building (pure resource hamlet)
-        const extractionBuilding = resourceAnalysis.dominantResource
-          ? getPrimaryExtractionBuilding(resourceAnalysis.dominantResource)
-          : null;
-        centerBuilding = extractionBuilding || primaryBuilding;
-      } else {
-        // 40% - house + extraction building
+      // Resource-focused hamlet: house + extraction building
+      if (compositionRoll < 0.7) {
+        // 70% - house center with extraction building adjacent
         centerBuilding = BuildingType.House;
         hasSecondBuilding = true;
+      } else {
+        // 30% - just a house (small frontier outpost)
+        centerBuilding = BuildingType.House;
       }
     } else {
       // Generic hamlet (no good resources)
       if (compositionRoll < 0.5) {
         // 50% - just a house
         centerBuilding = BuildingType.House;
-      } else if (compositionRoll < 0.8) {
-        // 30% - just a specialized building
-        centerBuilding = primaryBuilding;
       } else {
-        // 20% - house + specialized building
+        // 50% - house + specialized building (field, chapel, etc)
         centerBuilding = BuildingType.House;
         hasSecondBuilding = true;
       }
@@ -721,11 +783,104 @@ export class SettlementGenerator {
       }
     }
 
+    // Hamlets get a simple pier (no dock building) if coastal
+    const pierTile = this.tryPlaceSimplePier(grid, centerTile, settlementId);
+    if (pierTile) {
+      tiles.push(pierTile);
+    }
+
     return {
+      name: this.nameGenerator.generateName("hamlet", specialization),
       type: "hamlet",
       specialization,
       center: { col: centerTile.col, row: centerTile.row },
       tiles,
     };
+  }
+
+  /**
+   * Try to place a simple pier for coastal hamlets (no dock building on shore)
+   */
+  private tryPlaceSimplePier(
+    grid: Grid<HexTile>,
+    centerTile: HexTile,
+    settlementId: number
+  ): { col: number; row: number } | null {
+    // Check if settlement is near water (within 2 tiles for hamlets)
+    const nearbyTiles = this.placer.getNeighborsInRange(grid, centerTile, 2);
+    
+    // Find water tiles adjacent to settlement
+    for (const tile of nearbyTiles) {
+      if (!isWater(tile.terrain)) continue;
+      if (tile.building !== BuildingType.None) continue;
+      
+      // Check if adjacent to shore or settlement tile
+      const neighbors = getHexNeighbors(grid, tile);
+      const hasShoreOrSettlement = neighbors.some(n => 
+        n.terrain === TerrainType.Shore || n.settlementId === settlementId
+      );
+      
+      if (hasShoreOrSettlement) {
+        // Place single pier on water
+        tile.building = BuildingType.Pier;
+        tile.vegetation = VegetationType.None;
+        
+        console.log(`[Settlement] ⚓ Placed simple pier at (${tile.col},${tile.row}) for hamlet at (${centerTile.col},${centerTile.row})`);
+        return { col: tile.col, row: tile.row };
+      }
+    }
+    
+    return null;
+  }
+
+  /**
+   * Try to place a dock/pier for larger coastal settlements (cities, villages)
+   */
+  private tryPlaceCoastalDock(
+    grid: Grid<HexTile>,
+    centerTile: HexTile,
+    settlementId: number
+  ): { col: number; row: number } | null {
+    // Check if settlement is near water (within 3 tiles)
+    const nearbyTiles = this.placer.getNeighborsInRange(grid, centerTile, 3);
+    
+    // Find shore tiles to place dock on
+    for (const shoreTile of nearbyTiles) {
+      // Must be shore terrain (perfect for docks)
+      if (shoreTile.terrain !== TerrainType.Shore) continue;
+      
+      // Must not have a building
+      if (shoreTile.building !== BuildingType.None) continue;
+      
+      // Can be part of THIS settlement or no settlement at all
+      if (shoreTile.settlementId !== undefined && shoreTile.settlementId !== settlementId) continue;
+      
+      // Check if adjacent to water
+      const neighbors = getHexNeighbors(grid, shoreTile);
+      const hasWater = neighbors.some(n => isWater(n.terrain));
+      
+      if (hasWater) {
+        // Place dock on shore (land)
+        shoreTile.building = BuildingType.Dock;
+        shoreTile.vegetation = VegetationType.None;
+        shoreTile.isRough = false;
+        shoreTile.settlementId = settlementId;
+        
+        // Now extend one pier into the water for embarking/disembarking
+        for (const waterTile of neighbors) {
+          if (!isWater(waterTile.terrain)) continue;
+          if (waterTile.building !== BuildingType.None) continue;
+          
+          // Place single pier on first available water tile
+          waterTile.building = BuildingType.Pier;
+          waterTile.vegetation = VegetationType.None;
+          
+          console.log(`[Settlement] ⚓ Placed dock at (${shoreTile.col},${shoreTile.row}) with pier at (${waterTile.col},${waterTile.row})`);
+          return { col: shoreTile.col, row: shoreTile.row };
+        }
+      }
+    }
+    
+    return null;
   }
 }

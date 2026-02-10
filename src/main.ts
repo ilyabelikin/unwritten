@@ -7,8 +7,8 @@ async function bootstrap() {
   await app.init({
     background: "#0e0e1a",
     resizeTo: window,
-    antialias: false,
-    roundPixels: true,
+    antialias: true,
+    roundPixels: false,
     resolution: window.devicePixelRatio || 1,
     autoDensity: true,
   });

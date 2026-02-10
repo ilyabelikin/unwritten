@@ -128,13 +128,13 @@ export class ResourceGenerator {
 
     switch (terrain) {
       case TerrainType.DeepWater:
-        // Deep water - fish (sparse)
+        // Deep water - fish (sparse, harder to access)
         candidates.push({ type: ResourceType.Fish, weight: 1 });
         break;
 
       case TerrainType.ShallowWater:
-        // Shallow water - fish (more abundant than deep water)
-        candidates.push({ type: ResourceType.Fish, weight: 2 });
+        // Shallow water - fish (more abundant, close to shore, prime fishing grounds)
+        candidates.push({ type: ResourceType.Fish, weight: 4 });
         break;
 
       case TerrainType.Shore:
@@ -143,8 +143,10 @@ export class ResourceGenerator {
         break;
 
       case TerrainType.Plains:
-        // Plains - livestock, clay
+        // Plains - livestock, wheat, vegetables, clay
         candidates.push({ type: ResourceType.Livestock, weight: 3 });
+        candidates.push({ type: ResourceType.Wheat, weight: 3 }); // Good farmland
+        candidates.push({ type: ResourceType.Vegetables, weight: 3 }); // Gardens
         candidates.push({ type: ResourceType.Clay, weight: 2 });
         
         // If plains has trees, can have timber or game

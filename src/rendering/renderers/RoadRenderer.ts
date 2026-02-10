@@ -47,6 +47,9 @@ export class RoadRenderer {
     // Now draw all collected road segments in two passes
     this.drawAllRoads(roadGraphics);
 
+    // ALSO draw any other tiles marked with hasRoad (e.g., hamlet connections from Pass 9)
+    this.drawAdditionalRoadTiles(roadGraphics, grid);
+
     console.log('[RoadRenderer] Roads drawn successfully');
   }
 
@@ -350,5 +353,90 @@ export class RoadRenderer {
     gfx.fill({ color: 0x8b4513 });
     gfx.rect(cx - w / 2 - 3, cy - h / 4, 6, 5);
     gfx.fill({ color: 0x8b4513 });
+  }
+
+  /**
+   * Draw additional tiles marked with hasRoad that aren't part of main road segments
+   * (e.g., hamlet connections from Pass 9)
+   */
+  private drawAdditionalRoadTiles(roadGraphics: Graphics, grid: Iterable<HexTile>): void {
+    const roadColor = 0xa89968;
+    const roadDark = 0x8b7e5a;
+    const roadWidth = 6;
+
+    // Collect all tiles with hasRoad that aren't in existing segments
+    const existingRoadTiles = new Set<string>();
+    for (const segment of this.roadSegments) {
+      for (const tile of segment) {
+        existingRoadTiles.add(`${tile.col},${tile.row}`);
+      }
+    }
+
+    const additionalTiles: HexTile[] = [];
+    for (const tile of grid) {
+      if (tile.hasRoad && !existingRoadTiles.has(`${tile.col},${tile.row}`)) {
+        additionalTiles.push(tile);
+      }
+    }
+
+    if (additionalTiles.length === 0) return;
+
+    console.log(`[RoadRenderer] Drawing ${additionalTiles.length} additional road tiles (hamlet connections)`);
+
+    // Group connected tiles into paths for smoother rendering
+    const paths = this.groupAdjacentTiles(additionalTiles);
+
+    // Draw each path as a segment (matching main road style)
+    for (const path of paths) {
+      // Draw outline first
+      this.drawSegmentLayer(roadGraphics, path, roadDark, roadWidth + 2, 0.6);
+    }
+
+    for (const path of paths) {
+      // Draw surface on top
+      this.drawSegmentLayer(roadGraphics, path, roadColor, roadWidth, 0.8);
+    }
+  }
+
+  /**
+   * Group adjacent road tiles into connected paths for smoother rendering
+   */
+  private groupAdjacentTiles(tiles: HexTile[]): HexTile[][] {
+    if (tiles.length === 0) return [];
+
+    const paths: HexTile[][] = [];
+    const remaining = new Set(tiles);
+
+    while (remaining.size > 0) {
+      const path: HexTile[] = [];
+      const startIter = remaining.values().next();
+      if (startIter.done) break;
+      const start = startIter.value;
+      path.push(start);
+      remaining.delete(start);
+
+      // Greedily extend path by finding adjacent tiles
+      let extended = true;
+      while (extended) {
+        extended = false;
+        const last = path[path.length - 1];
+
+        // Try to find an adjacent tile in remaining set
+        for (const tile of remaining) {
+          const dx = Math.abs(tile.col - last.col);
+          const dy = Math.abs(tile.row - last.row);
+          if (dx <= 1 && dy <= 1 && (dx + dy) <= 1) {
+            path.push(tile);
+            remaining.delete(tile);
+            extended = true;
+            break;
+          }
+        }
+      }
+
+      paths.push(path);
+    }
+
+    return paths;
   }
 }

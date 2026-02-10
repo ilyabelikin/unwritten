@@ -87,17 +87,17 @@ export class TileRenderer {
     const corners = isoCorners(hex);
     const pos = hexIsoPosition(hex);
 
-    // Round position to whole pixels to prevent subpixel gaps
-    gfx.position.set(Math.round(pos.x), Math.round(pos.y));
+    // Use exact position - let antialiasing handle subpixel rendering
+    gfx.position.set(pos.x, pos.y);
 
     const config = TERRAIN_CONFIG[hex.terrain];
     const sideH = getTileSideHeight(hex.terrain);
 
-    // Expand the polygon slightly to prevent subpixel seams between tiles
-    const expandedCorners = this.expandPoly(corners, 0.5);
+    // Use exact corners - no expansion
+    const renderCorners = corners;
 
     // 1) Side faces (drawn first so top face covers the joint)
-    this.terrainRenderer.drawSideFaces(gfx, hex, expandedCorners, sideH, config.baseColor);
+    this.terrainRenderer.drawSideFaces(gfx, hex, renderCorners, sideH, config.baseColor);
 
     // 2) Top face fill with elevation-based lighting
     const elevation = getTerrainElevation(hex.terrain);
@@ -110,10 +110,9 @@ export class TileRenderer {
       topColor = darkenColor(config.baseColor, 1 - shadowFactor);
     }
     
-    gfx.poly(expandedCorners);
+    // Draw top face as a single closed polygon without stroke
+    gfx.poly(renderCorners);
     gfx.fill({ color: topColor });
-    // Use a very thin, semi-transparent stroke to fill seams without creating visible borders
-    gfx.stroke({ color: topColor, width: 0.5, alpha: 0.5 });
 
     // 3) Terrain detail on top face
     this.terrainRenderer.drawTerrainDetail(gfx, hex, corners);

@@ -56,10 +56,11 @@ export class SettlementPlacer {
    * Check if a hex is suitable for building
    */
   isSuitableForBuilding(hex: HexTile): boolean {
-    // Can only build on plains and hills
+    // Can build on plains, hills, and shores (for coastal settlements)
     if (
       hex.terrain !== TerrainType.Plains &&
-      hex.terrain !== TerrainType.Hills
+      hex.terrain !== TerrainType.Hills &&
+      hex.terrain !== TerrainType.Shore
     ) {
       return false;
     }

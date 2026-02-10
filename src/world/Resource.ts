@@ -14,6 +14,8 @@ export enum ResourceType {
   
   // Agricultural/Pastoral resources
   Livestock = "livestock",         // Sheep, cattle on plains/hills
+  Wheat = "wheat",                 // Grain from fields
+  Vegetables = "vegetables",       // Fresh vegetables from gardens/fields
   Clay = "clay",                   // Pottery, bricks - plains
   
   // Common minerals
@@ -74,7 +76,7 @@ export const RESOURCE_CONFIG: Record<ResourceType, ResourceConfig> = {
     description: "Abundant fishing grounds",
     color: Palette.waterShallow,
     accentColor: 0xC0C0C0, // Silver for fish
-    baseSpawnChance: 0.015,
+    baseSpawnChance: 0.025, // Increased for more coastal fishing villages
     renewable: true,
     category: "food",
   },
@@ -95,6 +97,26 @@ export const RESOURCE_CONFIG: Record<ResourceType, ResourceConfig> = {
     description: "Sheep and cattle grazing lands",
     color: Palette.plainsLight,
     accentColor: 0xF5F5DC, // Beige/wheat color
+    baseSpawnChance: 0.03,
+    renewable: true,
+    category: "food",
+  },
+  
+  [ResourceType.Wheat]: {
+    name: "Wheat",
+    description: "Grain fields for bread and food",
+    color: 0xF0E68C, // Khaki/wheat color
+    accentColor: 0xDAA520, // Goldenrod
+    baseSpawnChance: 0.035,
+    renewable: true,
+    category: "food",
+  },
+  
+  [ResourceType.Vegetables]: {
+    name: "Vegetables",
+    description: "Fresh vegetables from gardens and fields",
+    color: 0x32CD32, // Lime green
+    accentColor: 0x228B22, // Forest green
     baseSpawnChance: 0.03,
     renewable: true,
     category: "food",

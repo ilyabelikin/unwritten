@@ -63,6 +63,12 @@ export class BuildingRenderer {
       case BuildingType.FishingHut:
         this.industrialRenderer.drawFishingHut(gfx, cx, cy);
         break;
+      case BuildingType.FishingBoat:
+        this.industrialRenderer.drawFishingBoat(gfx, cx, cy);
+        break;
+      case BuildingType.Dock:
+        this.industrialRenderer.drawDock(gfx, cx, cy);
+        break;
       case BuildingType.Pasture:
         this.industrialRenderer.drawPasture(gfx, cx, cy);
         break;
@@ -104,6 +110,31 @@ export class BuildingRenderer {
       // Legacy mine (generic)
       case BuildingType.Mine:
         this.industrialRenderer.drawMine(gfx, cx, cy);
+        break;
+
+      // Industrial - Food Production Buildings
+      case BuildingType.Bakery:
+        this.industrialRenderer.drawBakery(gfx, cx, cy);
+        break;
+      case BuildingType.Butcher:
+        this.industrialRenderer.drawButcher(gfx, cx, cy);
+        break;
+        
+      // Industrial - Material Production Buildings
+      case BuildingType.Smelter:
+        this.industrialRenderer.drawSmelter(gfx, cx, cy);
+        break;
+      case BuildingType.Smithy:
+        this.industrialRenderer.drawSmithy(gfx, cx, cy);
+        break;
+      case BuildingType.CharcoalBurner:
+        this.industrialRenderer.drawCharcoalBurner(gfx, cx, cy);
+        break;
+      case BuildingType.Kiln:
+        this.industrialRenderer.drawKiln(gfx, cx, cy);
+        break;
+      case BuildingType.Tannery:
+        this.industrialRenderer.drawTannery(gfx, cx, cy);
         break;
 
       // Commercial

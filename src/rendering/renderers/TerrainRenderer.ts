@@ -73,36 +73,7 @@ export class TerrainRenderer {
         { x: a.x, y: a.y + sideH },
       ]);
       gfx.fill({ color });
-
-      // Subtle edge line between side faces
-      gfx.moveTo(a.x, a.y);
-      gfx.lineTo(a.x, a.y + sideH);
-      gfx.stroke({ color: darkenColor(baseColor, 0.35), width: 0.5, alpha: 0.4 });
-    }
-
-    // Bottom outline of side walls
-    const bottomCorners = corners
-      .filter((c) => c.y >= centerY - 0.5)
-      .sort((a, b) => a.x - b.x);
-
-    if (bottomCorners.length >= 2) {
-      const leftMost = bottomCorners[0];
-      const rightMost = bottomCorners[bottomCorners.length - 1];
-      gfx.moveTo(leftMost.x, leftMost.y + sideH);
-      // Draw along the bottom edge of side walls
-      for (let i = 0; i < n; i++) {
-        const c = corners[i];
-        const next = corners[(i + 1) % n];
-        const midY = (c.y + next.y) / 2;
-        if (midY >= centerY - 0.5) {
-          gfx.lineTo(next.x, next.y + sideH);
-        }
-      }
-      gfx.stroke({
-        color: darkenColor(baseColor, 0.3),
-        width: 1,
-        alpha: 0.3,
-      });
+      // No strokes on vertical edges - they create visible seams between tiles
     }
   }
 

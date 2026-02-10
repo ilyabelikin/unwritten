@@ -1,14 +1,16 @@
 import { Grid, rectangle } from "honeycomb-grid";
 import { HexTile } from "./HexTile";
 import { BuildingType, Settlement } from "./Building";
+import { HousingUpgradeSystem } from "./HousingUpgrade";
 import { RoadGenerator } from "./RoadGenerator";
 import { IPathfindingMap } from "../pathfinding/Pathfinding";
-import { getHexNeighbors, getHexDistance } from "./HexMapUtils";
+import { getHexNeighbors, getHexDistance, HEX_NEIGHBOR_DIRS } from "./HexMapUtils";
 import { TerrainGenerator } from "./generators/TerrainGenerator";
 import { VegetationGenerator } from "./generators/VegetationGenerator";
 import { SettlementGenerator } from "./generators/SettlementGenerator";
 import { ResourceGenerator } from "./generators/ResourceGenerator";
 import { RoadsideResourcePlacer } from "./generators/RoadsideResourcePlacer";
+import { isWater } from "./Terrain";
 
 export interface WorldGenConfig {
   width: number;
@@ -61,6 +63,7 @@ export class WorldGenerator implements IPathfindingMap {
   private settlementGenerator: SettlementGenerator;
   private resourceGenerator: ResourceGenerator;
   private roadsideResourcePlacer: RoadsideResourcePlacer;
+  private housingUpgradeSystem: HousingUpgradeSystem;
 
   constructor(config: Partial<WorldGenConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -75,6 +78,7 @@ export class WorldGenerator implements IPathfindingMap {
     );
     this.resourceGenerator = new ResourceGenerator(this.config.seed);
     this.roadsideResourcePlacer = new RoadsideResourcePlacer();
+    this.housingUpgradeSystem = new HousingUpgradeSystem();
   }
 
   getSettlements(): Settlement[] {
@@ -118,13 +122,19 @@ export class WorldGenerator implements IPathfindingMap {
     console.log('[WorldGenerator] Pass 4: Rough terrain');
     this.vegetationGenerator.applyRoughTerrain(this.grid);
 
-    // Pass 5: Generate settlements (cities and villages)
-    console.log('[WorldGenerator] Pass 5: Settlements');
+    // Pass 5: Generate natural resources (BEFORE settlements so they can be resource-aware)
+    console.log('[WorldGenerator] Pass 5: Resources');
+    this.resourceGenerator.generateResources(this.grid);
+
+    // Pass 6: Generate settlements (cities and villages) - now resource-aware!
+    console.log('[WorldGenerator] Pass 6: Settlements');
     this.settlements = this.settlementGenerator.generateSettlements(this.grid);
 
-    // Pass 6: Generate natural resources
-    console.log('[WorldGenerator] Pass 6: Resources');
-    this.resourceGenerator.generateResources(this.grid);
+    // Pass 6.5: Set initial housing densities (cities=3, villages=2, hamlets=1)
+    console.log('[WorldGenerator] Pass 6.5: Housing densities');
+    for (const settlement of this.settlements) {
+      this.housingUpgradeSystem.setInitialDensity(this.grid, settlement);
+    }
 
     // Pass 7: Generate roads connecting settlements
     console.log('[WorldGenerator] Pass 7: Roads');
@@ -135,10 +145,20 @@ export class WorldGenerator implements IPathfindingMap {
     const roadsideHamlets = this.roadsideResourcePlacer.placeRoadsideHamlets(
       this.grid,
       this.settlements,
+      this.settlementGenerator.getNameGenerator(),
       this.seededRandom.bind(this)
     );
     // Add new hamlets to settlements list
     this.settlements.push(...roadsideHamlets);
+    
+    // Set initial densities for roadside hamlets too
+    for (const hamlet of roadsideHamlets) {
+      this.housingUpgradeSystem.setInitialDensity(this.grid, hamlet);
+    }
+
+    // Pass 9: Connect any hamlets near roads
+    console.log('[WorldGenerator] Pass 9: Connect hamlets to nearby roads');
+    this.connectHamletsToRoads(this.grid, this.settlements);
 
     console.log('[WorldGenerator] World generation complete!');
     console.log(`[WorldGenerator] Final settlement count: ${this.settlements.length} total`);
@@ -163,6 +183,106 @@ export class WorldGenerator implements IPathfindingMap {
       `Generated roads connecting ${this.settlements.length} settlements`,
     );
     console.log(`Total road tiles: ${roadTileCount}`);
+  }
+
+  /**
+   * Connect hamlets to nearby roads (Pass 9)
+   */
+  private connectHamletsToRoads(grid: Grid<HexTile>, settlements: Settlement[]): void {
+    let connectionsCreated = 0;
+    let hamletsChecked = 0;
+    let alreadyOnRoad = 0;
+    let noPathFound = 0;
+
+    // Only connect hamlets (not villages or cities)
+    const hamlets = settlements.filter(s => s.type === 'hamlet');
+
+    for (const hamlet of hamlets) {
+      hamletsChecked++;
+      const centerTile = grid.getHex(hamlet.center);
+      if (!centerTile) continue;
+
+      // Skip if hamlet is already on a road
+      if (centerTile.hasRoad) {
+        alreadyOnRoad++;
+        continue;
+      }
+
+      // BFS to find nearest road (within 3 tiles)
+      const path = this.findPathToRoad(grid, centerTile, 3);
+      if (path) {
+        let tilesMarked = 0;
+        
+        // For path length 2 (hamlet adjacent to road), mark the hamlet tile itself
+        if (path.length === 2) {
+          if (!centerTile.hasRoad) {
+            centerTile.hasRoad = true;
+            tilesMarked++;
+          }
+        } else {
+          // For longer paths, mark intermediate tiles (skip first hamlet and last road tile)
+          for (let i = 1; i < path.length - 1; i++) {
+            const tile = path[i];
+            if (!tile.hasRoad && tile.building === BuildingType.None) {
+              tile.hasRoad = true;
+              tilesMarked++;
+            }
+          }
+          // Also mark the hamlet tile itself
+          if (!centerTile.hasRoad) {
+            centerTile.hasRoad = true;
+            tilesMarked++;
+          }
+        }
+        
+        connectionsCreated++;
+        console.log(`[WorldGenerator] Connected hamlet at (${centerTile.col},${centerTile.row}), path length: ${path.length}, tiles marked: ${tilesMarked}`);
+      } else {
+        noPathFound++;
+      }
+    }
+
+    console.log(`[WorldGenerator] Hamlet road connections: ${connectionsCreated} connected, ${alreadyOnRoad} already on road, ${noPathFound} no path found (total: ${hamletsChecked})`);
+  }
+
+  /**
+   * Find shortest path from tile to nearest road using BFS
+   */
+  private findPathToRoad(
+    grid: Grid<HexTile>,
+    start: HexTile,
+    maxDistance: number
+  ): HexTile[] | null {
+    const visited = new Set<string>();
+    const queue: Array<{ hex: HexTile; path: HexTile[] }> = [
+      { hex: start, path: [start] },
+    ];
+    visited.add(`${start.col},${start.row}`);
+
+    while (queue.length > 0) {
+      const { hex, path } = queue.shift()!;
+
+      // Found a road!
+      if (hex.hasRoad && hex !== start) {
+        return path;
+      }
+
+      // Continue searching (within max distance)
+      if (path.length <= maxDistance) {
+        for (const dir of HEX_NEIGHBOR_DIRS) {
+          const neighbor = grid.neighborOf(hex, dir, { allowOutside: false });
+          if (neighbor) {
+            const key = `${neighbor.col},${neighbor.row}`;
+            if (!visited.has(key)) {
+              visited.add(key);
+              queue.push({ hex: neighbor, path: [...path, neighbor] });
+            }
+          }
+        }
+      }
+    }
+
+    return null; // No road found within range
   }
 
   /**

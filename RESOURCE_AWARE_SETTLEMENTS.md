@@ -17,6 +17,27 @@ This mirrors real medieval settlement patterns:
 - Salt works developed at coastal evaporation sites
 - Trading posts arose where multiple resources converged
 
+## World Generation Order
+
+**CRITICAL**: Resources MUST be generated BEFORE settlements to enable resource-aware placement.
+
+```
+Pass 1: Terrain generation
+Pass 2: Shore generation  
+Pass 3: Vegetation
+Pass 4: Rough terrain
+Pass 5: Resources          ← Generated FIRST
+Pass 6: Settlements        ← Then placed near resources
+Pass 7: Roads              ← Connect settlements
+Pass 8: Roadside hamlets   ← Exploit remaining resources near roads
+```
+
+**Why This Order Matters**:
+- If settlements are placed before resources, the resource-aware system finds ZERO resources → rejects all cities/villages
+- Resources are natural features (like terrain/vegetation) that settlements should respond to
+- Roads connect existing settlements
+- Roadside hamlets exploit leftover resources that happen to be accessible
+
 ## System Architecture
 
 ### 1. Resource Analysis (`ResourceAwareSettlementPlacer`)
@@ -84,7 +105,44 @@ Gold/Gems          → Mining Village (precious materials)
 
 **Fallback**: If no dominant resource, uses terrain-based specialization (original system).
 
-### 4. Extraction Building Placement
+### 4. Coastal Settlement Formation
+
+**Special logic for fishing villages and coastal settlements:**
+
+Fish resources spawn in water (1-2 tiles offshore), so coastal settlements require special handling:
+
+#### Shore Terrain Allowed
+- Settlement centers can be placed on **Shore** tiles (not just Plains/Hills)
+- This enables settlements to form directly on the coast
+- Puts them within range (3-4 tiles) of nearby fish resources
+
+#### Coastal Location Bonus
+```typescript
+if (hex.terrain === Shore) {
+  score += 1.5; // Coastal location bonus
+}
+```
+Encourages settlements to form on coasts even if fish aren't the highest quality resource.
+
+#### Fish Resource Value
+- Fish have value **2.0** (same as salt, stone, timber)
+- Higher than other food sources (livestock 1.5, wild game 1.5)
+- Reflects importance of fishing in medieval coastal economies
+
+#### Shallow Water Priority
+- Shallow water has **4x weight** for fish spawning (vs 1x for deep water)
+- Shallow water is closer to shore → more accessible
+- Creates prime fishing grounds near potential settlement sites
+
+#### Fishing Hut Placement
+- Fish are IN water (can't build on them)
+- Fishing Huts placed **adjacent** to fish (on shore or plains)
+- System automatically finds suitable adjacent tiles
+- Up to 2 tiles away if needed
+
+**Result**: Vibrant fishing villages form on coasts with multiple fishing huts exploiting nearby waters.
+
+### 5. Extraction Building Placement
 
 After determining specialization, the system:
 
@@ -108,7 +166,7 @@ After determining specialization, the system:
    - Building itself shows the resource is being exploited
    - Resource data remains for game mechanics
 
-### 5. Roadside Resource Exploitation (Pass 8)
+### 6. Roadside Resource Exploitation (Pass 8 - After roads in Pass 7)
 
 After roads are generated, a final pass places **roadside hamlets** to exploit high-quality resources near trade routes:
 
@@ -142,7 +200,7 @@ After roads are generated, a final pass places **roadside hamlets** to exploit h
 - Clay Pit hamlet (2 buildings: House + Clay Pit)
 - **Excellent Salt Works** (1 building: Salt Works on Excellent quality salt)
 
-### Roadside Hamlets (Pass 8)
+### Roadside Hamlets (Pass 8 - After roads in Pass 7)
 
 **Size**: 1-2 buildings  
 **Purpose**: Exploit high-quality resources along trade routes
@@ -245,7 +303,7 @@ Else:
   Fall back to terrain-based specialization
 ```
 
-### Step 3: Building Placement (Pass 6)
+### Step 3: Building Placement (Pass 6 - After resources in Pass 5)
 ```
 1. Place extraction buildings DIRECTLY ON resource tiles
    - Check if resource tile is suitable (terrain check)

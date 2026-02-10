@@ -2,9 +2,10 @@ import { Grid } from "honeycomb-grid";
 import { HexTile } from "../HexTile";
 import { BuildingType, Settlement } from "../Building";
 import { ResourceType } from "../Resource";
-import { VegetationType } from "../Terrain";
+import { TerrainType, VegetationType, isWater } from "../Terrain";
 import { getPrimaryExtractionBuilding } from "../ResourceExtraction";
 import { ResourceAwareSettlementPlacer } from "./ResourceAwareSettlementPlacer";
+import { SettlementNameGenerator } from "./SettlementNameGenerator";
 
 /**
  * Places additional hamlets to exploit high-quality resources near roads
@@ -28,6 +29,7 @@ export class RoadsideResourcePlacer {
   placeRoadsideHamlets(
     grid: Grid<HexTile>,
     settlements: Settlement[],
+    nameGenerator: SettlementNameGenerator,
     seededRandom: (seed: number) => number
   ): Settlement[] {
     const newHamlets: Settlement[] = [];
@@ -68,6 +70,7 @@ export class RoadsideResourcePlacer {
         candidate,
         hamletId,
         settlements,
+        nameGenerator,
         seededRandom
       );
 
@@ -178,6 +181,7 @@ export class RoadsideResourcePlacer {
     candidate: { tile: HexTile; resource: ResourceType; quality: number },
     settlementId: number,
     settlements: Settlement[],
+    nameGenerator: SettlementNameGenerator,
     seededRandom: (seed: number) => number
   ): Settlement | null {
     const resourceTile = candidate.tile;
@@ -213,30 +217,64 @@ export class RoadsideResourcePlacer {
       { col: buildingTile.col, row: buildingTile.row },
     ];
 
-    // 30% chance to add a house (worker's home)
-    const addHouse = seededRandom(settlementId * 17.3 + buildingTile.col) < 0.3;
-    if (addHouse) {
-      const neighbors = this.placer.getNeighborsInRange(grid, buildingTile, 1);
-      for (const neighbor of neighbors) {
-        if (
-          this.placer.isSuitableForBuilding(neighbor) &&
-          neighbor.building === BuildingType.None &&
-          neighbor.settlementId === undefined
-        ) {
-          neighbor.building = BuildingType.House;
-          neighbor.vegetation = VegetationType.None;
-          neighbor.isRough = false;
-          neighbor.settlementId = settlementId;
-          tiles.push({ col: neighbor.col, row: neighbor.row });
-          break;
-        }
+    // Special case: For fish, ALSO place a fishing boat ON the fish itself (in water)
+    if (candidate.resource === ResourceType.Fish) {
+      // Place boat ON the fish tile (in water) to show exploitation visually
+      // IMPORTANT: Only place boat if tile is actually in water!
+      if (resourceTile.building === BuildingType.None && isWater(resourceTile.terrain)) {
+        resourceTile.building = BuildingType.FishingBoat;
+        resourceTile.settlementId = settlementId;
+        tiles.push({ col: resourceTile.col, row: resourceTile.row });
+      }
+    }
+
+    // CRITICAL: Always add a house (workers need somewhere to live!)
+    // Try to place house adjacent to extraction building
+    const neighbors = this.placer.getNeighborsInRange(grid, buildingTile, 1);
+    let housePlaced = false;
+    
+    for (const neighbor of neighbors) {
+      if (
+        this.placer.isSuitableForBuilding(neighbor) &&
+        neighbor.building === BuildingType.None &&
+        neighbor.settlementId === undefined
+      ) {
+        neighbor.building = BuildingType.House;
+        neighbor.vegetation = VegetationType.None;
+        neighbor.isRough = false;
+        neighbor.settlementId = settlementId;
+        tiles.push({ col: neighbor.col, row: neighbor.row });
+        housePlaced = true;
+        break;
+      }
+    }
+    
+    // If we couldn't place a house adjacent, place extraction building as house instead
+    // (Better to have housing than pure extraction with no population)
+    if (!housePlaced) {
+      console.warn(`[RoadsideHamlet] Could not place house for hamlet at (${buildingTile.col}, ${buildingTile.row}), converting extraction building to house`);
+      buildingTile.building = BuildingType.House;
+    }
+
+    // Connect hamlet to the road with a path
+    this.connectToRoad(grid, buildingTile);
+
+    // Add dock if this is a coastal hamlet (fish resources are often coastal)
+    if (candidate.resource === ResourceType.Fish) {
+      const dockTile = this.tryPlaceCoastalDock(grid, buildingTile, settlementId);
+      if (dockTile) {
+        tiles.push(dockTile);
       }
     }
 
     // Determine specialization based on resource
     const specialization = this.getSpecializationForResource(candidate.resource);
+    
+    // Generate proper unique name using the name generator
+    const name = nameGenerator.generateName("hamlet", specialization);
 
     return {
+      name,
       type: "hamlet",
       specialization,
       center: { col: buildingTile.col, row: buildingTile.row },
@@ -294,5 +332,83 @@ export class RoadsideResourcePlacer {
       default:
         return 1.0;
     }
+  }
+
+  /**
+   * Connect hamlet to the nearest road with a path
+   */
+  private connectToRoad(grid: Grid<HexTile>, hamletTile: HexTile): void {
+    // BFS to find path to nearest road
+    const visited = new Set<string>();
+    const queue: Array<{ hex: HexTile; path: HexTile[] }> = [
+      { hex: hamletTile, path: [hamletTile] },
+    ];
+    visited.add(`${hamletTile.col},${hamletTile.row}`);
+
+    while (queue.length > 0) {
+      const { hex, path } = queue.shift()!;
+
+      // Found a road! Connect to it
+      if (hex.hasRoad && hex !== hamletTile) {
+        // Mark all tiles in path (except hamlet and road end) as roads
+        for (let i = 1; i < path.length - 1; i++) {
+          const tile = path[i];
+          if (!tile.hasRoad && tile.building === BuildingType.None) {
+            tile.hasRoad = true;
+          }
+        }
+        return;
+      }
+
+      // Continue searching (max 3 tiles away)
+      if (path.length < 4) {
+        for (const neighbor of this.placer.getNeighborsInRange(grid, hex, 1)) {
+          const key = `${neighbor.col},${neighbor.row}`;
+          if (!visited.has(key)) {
+            visited.add(key);
+            queue.push({ hex: neighbor, path: [...path, neighbor] });
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Try to place a dock/pier for a coastal hamlet
+   */
+  private tryPlaceCoastalDock(
+    grid: Grid<HexTile>,
+    centerTile: HexTile,
+    settlementId: number
+  ): { col: number; row: number } | null {
+    // Check if hamlet is near water (within 2 tiles)
+    const nearbyTiles = this.placer.getNeighborsInRange(grid, centerTile, 2);
+    
+    // Find shore tiles adjacent to water
+    for (const tile of nearbyTiles) {
+      // Must be shore terrain (perfect for docks)
+      if (tile.terrain !== TerrainType.Shore) continue;
+      
+      // Must not have a building
+      if (tile.building !== BuildingType.None) continue;
+      
+      // Must not be part of settlement yet
+      if (tile.settlementId !== undefined) continue;
+      
+      // Check if adjacent to water
+      const neighbors = this.placer.getNeighborsInRange(grid, tile, 1);
+      const hasWater = neighbors.some(n => isWater(n.terrain));
+      
+      if (hasWater) {
+        // Found perfect dock location!
+        tile.building = BuildingType.Dock;
+        tile.vegetation = VegetationType.None;
+        tile.isRough = false;
+        tile.settlementId = settlementId;
+        return { col: tile.col, row: tile.row };
+      }
+    }
+    
+    return null;
   }
 }
